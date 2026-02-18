@@ -1,0 +1,129 @@
+Crie um aplicativo Android cujo objetivo é permitir que streamers visualizem simultaneamente o chat de múltiplas transmissões ao vivo em uma única tela, permitindo que o usuário adicione manualmente URLs de chats de diferentes plataformas de streaming.
+O aplicativo deve ser leve, rápido, simples e totalmente funcional sem necessidade de login, cadastro ou servidor externo.
+🎯 Objetivo do Aplicativo
+Permitir que streamers que transmitem para várias plataformas consigam acompanhar todos os chats em uma única tela do celular, servindo como substituto de um segundo monitor.
+O aplicativo deve funcionar localmente no dispositivo e não deve exigir criação de conta.
+🧩 Funcionalidades Obrigatórias
+➤ Cadastro de Chats
+O usuário deve conseguir adicionar novos chats manualmente informando:
+
+URL do chat ou live
+Nome personalizado do chat
+Plataforma (opcional)
+Opção de ativar ou desativar o chat
+O sistema deve permitir cadastro ilimitado de chats.
+➤ Gerenciamento de Chats
+O aplicativo deve possuir uma tela para gerenciamento contendo:
+
+Lista de chats cadastrados
+Opção de editar chat
+Opção de remover chat
+Opção de reordenar chats
+Opção de ativar/desativar chats temporariamente
+➤ Visualização Individual do Chat
+Cada chat deve poder ser aberto separadamente contendo:
+
+Exibição das mensagens em tempo real
+Nome do usuário da mensagem
+Mensagem enviada
+Avatar do usuário (quando disponível)
+Identificação visual da plataforma
+Scroll automático com opção de pausar
+➤ Visualização Multichat (Modo Principal do App)
+O aplicativo deve permitir visualizar todos os chats simultaneamente em uma única tela.
+
+O usuário deve poder escolher:
+Layout em colunas
+Layout em grade
+Layout em lista vertical
+Cada chat deve funcionar de forma independente dentro da tela.
+➤ Atualização em Tempo Real
+Os chats devem atualizar automaticamente utilizando:
+
+WebView incorporado
+
+OU
+APIs públicas quando disponíveis
+Não deve exigir atualização manual da tela.
+➤ Identificação Visual
+Cada chat deve exibir:
+
+Nome do chat
+Ícone da plataforma
+Destaque visual para diferenciar plataformas
+➤ Modo Streamer (Prioridade de Uso)
+O aplicativo deve ter um modo otimizado para transmissão contendo:
+
+Interface limpa
+Botões ocultáveis
+Tela sempre ativa (evitar bloqueio do celular)
+Ajuste rápido de zoom e tamanho da fonte
+Opção de fixar chats importantes
+💾 Armazenamento Local
+O aplicativo deve salvar todos os dados localmente no dispositivo utilizando:
+
+SQLite ou Room Database
+Os dados que devem ser salvos incluem:
+
+Chats cadastrados
+Configurações do usuário
+Layout selecionado
+Ordem dos chats
+Os dados devem persistir mesmo após fechar o aplicativo.
+🎨 Interface do Usuário
+Requisitos Visuais
+Design simples e funcional
+Tema Dark Mode obrigatório
+Interface otimizada para leitura rápida
+Navegação simples e intuitiva
+Telas Obrigatórias
+Tela Inicial
+Botão para abrir modo multichat
+Botão para adicionar novo chat
+Botão para gerenciar chats
+Tela de Gerenciamento
+Lista dos chats cadastrados
+Opções de edição e exclusão
+Tela Multichat
+Exibição simultânea dos chats ativos
+Opção de alterar layout
+Controle de zoom
+Scroll independente por chat
+⚙️ Requisitos Técnicos
+Plataforma
+Desenvolver utilizando uma das opções:
+
+Kotlin + Jetpack Compose (preferencial)
+
+OU
+Flutter
+Compatibilidade
+Android 8 ou superior
+Arquitetura Recomendada
+MVVM
+Modularização de componentes
+Uso de ViewModel
+Uso de Coroutines ou Streams reativos
+🔧 Recursos Extras (Desejáveis)
+Filtro por palavras-chave
+Destaque de mensagens contendo menções
+Ajuste manual do tamanho do chat
+Opção de exportar/importar configuração de chats
+Modo paisagem otimizado para tablets ou suporte lateral do celular
+Opção de transparência dos chats
+Opção de manter app sempre visível (overlay ou picture-in-picture)
+🔒 Segurança
+Não coletar dados pessoais
+Não exigir permissões desnecessárias
+Respeitar políticas das plataformas de streaming
+📦 Entregáveis Esperados
+Código fonte completo
+Interface funcional
+Sistema multichat funcionando
+Persistência local de dados
+Documentação básica de uso
+🚀 Diretrizes de Performance
+Minimizar uso de bateria
+Minimizar uso de memória
+Atualização eficiente dos chats
+Otimização para conexões móveis
