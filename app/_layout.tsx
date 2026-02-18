@@ -26,6 +26,7 @@ function RootLayoutNav() {
       <Stack.Screen name="add-chat" />
       <Stack.Screen name="multichat" />
       <Stack.Screen name="single-chat" />
+      <Stack.Screen name="platform-login" options={{ animation: "slide_from_bottom" }} />
     </Stack>
   );
 }

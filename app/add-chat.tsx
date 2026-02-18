@@ -57,23 +57,31 @@ export default function AddChatScreen() {
 
     Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
 
+    const finalPlatform = platform || detectPlatform(url);
+
     if (editingChat) {
       await updateChat(editingChat.id, {
         name: name.trim(),
         url: url.trim(),
-        platform: platform || detectPlatform(url),
+        platform: finalPlatform,
       });
+      router.push({
+        pathname: "/platform-login",
+        params: { platform: finalPlatform, chatUrl: url.trim() },
+      } as any);
     } else {
       await addChat({
         name: name.trim(),
         url: url.trim(),
-        platform: platform || detectPlatform(url),
+        platform: finalPlatform,
         enabled: true,
         pinned: false,
       });
+      router.push({
+        pathname: "/platform-login",
+        params: { platform: finalPlatform, chatUrl: url.trim() },
+      } as any);
     }
-
-    router.back();
   };
 
   return (
