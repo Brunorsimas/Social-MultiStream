@@ -11,7 +11,7 @@ export interface ChatConfig {
 }
 
 export interface AppSettings {
-  layout: "columns" | "grid" | "list";
+  layout: "columns" | "grid" | "list" | "merged";
   fontSize: number;
   streamerMode: boolean;
   keepScreenOn: boolean;

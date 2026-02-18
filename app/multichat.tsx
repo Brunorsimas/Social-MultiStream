@@ -8,9 +8,10 @@ import * as Haptics from "expo-haptics";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import Colors from "@/constants/colors";
 import ChatWebView from "@/components/ChatWebView";
+import MergedChatView from "@/components/MergedChatView";
 import { useChats } from "@/lib/chat-context";
 
-type LayoutMode = "columns" | "grid" | "list";
+type LayoutMode = "columns" | "grid" | "list" | "merged";
 
 export default function MultiChatScreen() {
   const insets = useSafeAreaInsets();
@@ -26,11 +27,11 @@ export default function MultiChatScreen() {
 
   const cycleLayout = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const modes: LayoutMode[] = ["columns", "grid", "list"];
+    const modes: LayoutMode[] = ["columns", "grid", "list", "merged"];
     const nextIndex = (modes.indexOf(layout) + 1) % modes.length;
     const next = modes[nextIndex];
     setLayout(next);
-    updateSettings({ layout: next });
+    updateSettings({ layout: next as any });
   };
 
   const adjustFontSize = (delta: number) => {
@@ -45,7 +46,18 @@ export default function MultiChatScreen() {
       case "columns": return "view-column";
       case "grid": return "view-grid";
       case "list": return "view-sequential";
+      case "merged": return "layers";
       default: return "view-grid";
+    }
+  };
+
+  const getLayoutLabel = (): string => {
+    switch (layout) {
+      case "columns": return "Columns";
+      case "grid": return "Grid";
+      case "list": return "List";
+      case "merged": return "Merged";
+      default: return "";
     }
   };
 
@@ -63,6 +75,12 @@ export default function MultiChatScreen() {
             <Text style={styles.emptyBtnText}>Manage Chats</Text>
           </Pressable>
         </View>
+      );
+    }
+
+    if (layout === "merged") {
+      return (
+        <MergedChatView chats={activeChats} fontSize={fontSize} />
       );
     }
 
@@ -132,7 +150,7 @@ export default function MultiChatScreen() {
 
           <View style={styles.toolbarCenter}>
             <Text style={styles.toolbarTitle}>
-              {activeChats.length} chat{activeChats.length !== 1 ? "s" : ""}
+              {activeChats.length} chat{activeChats.length !== 1 ? "s" : ""} · {getLayoutLabel()}
             </Text>
           </View>
 
