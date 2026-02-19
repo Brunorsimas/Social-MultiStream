@@ -1,0 +1,215 @@
+Implementar Sistema de Agregação de Chats estilo Social Stream Ninja
+
+Estamos trabalhando no projeto Android MultiChat Stream Viewer em Kotlin + Jetpack Compose.
+
+Objetivo: implementar um sistema de agregação de mensagens semelhante ao Social Stream Ninja, onde múltiplos chats são combinados em uma única timeline unificada.
+
+🎯 Objetivo Técnico
+
+Criar um sistema que:
+
+Capture mensagens de múltiplas plataformas (via WebView ou API)
+
+Normalize os dados em um formato único
+
+Envie tudo para um agregador central
+
+Exiba em uma única janela
+
+Mostre o ícone da plataforma de origem
+
+Sem remover o modo multichat tradicional.
+
+🧩 ETAPA 1 — NORMALIZAÇÃO DE MENSAGENS
+
+Criar um modelo padrão que represente QUALQUER mensagem, independentemente da plataforma:
+
+data class UnifiedChatMessage(
+    val messageId: String,
+    val platform: ChatPlatform,
+    val chatId: String,
+    val chatName: String,
+    val userName: String,
+    val userAvatar: String?,
+    val message: String,
+    val timestamp: Long
+)
+
+
+Criar enum:
+
+enum class ChatPlatform {
+    YOUTUBE,
+    TWITCH,
+    KICK,
+    FACEBOOK,
+    UNKNOWN
+}
+
+🧩 ETAPA 2 — EMISSÃO DE EVENTOS POR CHAT
+
+Cada ChatWebViewComponent deve:
+
+Interceptar mensagens via JavaScript interface
+OU
+
+Consumir API quando disponível
+
+Toda nova mensagem deve ser enviada para:
+
+UnifiedMessageBus
+
+
+Criar um MessageBus global usando:
+
+MutableSharedFlow<UnifiedChatMessage>
+
+🧩 ETAPA 3 — AGREGADOR CENTRAL
+
+Criar classe:
+
+UnifiedChatAggregator
+
+
+Responsável por:
+
+Receber mensagens do MessageBus
+
+Manter lista em memória
+
+Ordenar por timestamp
+
+Limitar histórico (ex: 500 mensagens)
+
+Expor StateFlow<List<UnifiedChatMessage>>
+
+🧩 ETAPA 4 — VIEWMODEL
+
+Criar:
+
+UnifiedChatViewModel
+
+
+Ele deve:
+
+Observar o Aggregator
+
+Expor lista pronta para UI
+
+Permitir limpar histórico
+
+Permitir ativar/desativar modo unificado
+
+🧩 ETAPA 5 — UI COMPOSE
+
+Criar:
+
+UnifiedChatScreen()
+
+
+Implementação:
+
+LazyColumn
+
+Scroll automático
+
+rememberLazyListState()
+
+Auto-scroll se usuário estiver no final
+
+Botão “Pausar Scroll”
+
+Cada item deve conter:
+
+Ícone da plataforma
+
+Nome do usuário
+
+Nome do chat
+
+Mensagem
+
+Cor diferente por plataforma
+
+Exemplo visual:
+
+🟥 [YouTube] João (Live Principal)
+Mensagem aqui
+
+🟣 [Twitch] Maria (Live Secundária)
+Mensagem aqui
+
+🧩 ETAPA 6 — TOGGLE NA TELA MULTICHAT
+
+Adicionar Switch:
+
+"Modo Agregador"
+
+Se ativo:
+
+Esconder múltiplas WebViews
+
+Mostrar UnifiedChatScreen()
+
+Se desativado:
+
+Voltar ao modo multichat normal
+
+Persistir escolha via DataStore.
+
+🧩 IMPORTANTE — DIFERENÇA CRÍTICA
+
+Não combinar WebViews.
+
+Não renderizar várias WebViews dentro de uma só.
+
+O correto é:
+
+Capturar mensagens → Normalizar → Agregar → Renderizar uma única lista Compose.
+
+⚡ PERFORMANCE
+
+Limitar mensagens em memória
+
+Remover antigas automaticamente
+
+Não usar LiveData
+
+Usar StateFlow
+
+Não bloquear main thread
+
+Processamento em Dispatchers.Default
+
+🔥 RESULTADO ESPERADO
+
+Sistema igual ao Social Stream Ninja
+
+Uma única timeline
+
+Mensagens de várias plataformas
+
+Ícone de origem
+
+Performance estável
+
+🚨 POSSÍVEL PROBLEMA REAL
+
+Se você estiver apenas carregando chats via WebView pura (sem API ou JS bridge), você NÃO consegue capturar mensagens programaticamente.
+
+Nesse caso, a IDE precisa implementar:
+
+addJavascriptInterface()
+
+
+para extrair mensagens do DOM da página.
+
+Se quiser, posso agora te explicar:
+
+Como capturar mensagens do YouTube via JS bridge
+
+Como capturar mensagens do Twitch
+
+Como estruturar isso corretamente
+
+Ou como fazer isso usando API oficial ao invés de WebView
