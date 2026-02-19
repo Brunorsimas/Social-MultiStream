@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Pressable, StyleSheet, Platform, ScrollView, Dimensions } from "react-native";
+import { View, Text, Pressable, StyleSheet, Platform, ScrollView, Dimensions, Switch } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -9,6 +9,7 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import Colors from "@/constants/colors";
 import ChatWebView from "@/components/ChatWebView";
 import MergedChatView from "@/components/MergedChatView";
+import UnifiedChatView from "@/components/UnifiedChatView";
 import { useChats } from "@/lib/chat-context";
 
 type LayoutMode = "columns" | "grid" | "list" | "merged";
@@ -19,11 +20,19 @@ export default function MultiChatScreen() {
   const [showControls, setShowControls] = useState(true);
   const [layout, setLayout] = useState<LayoutMode>(settings.layout);
   const [fontSize, setFontSize] = useState(settings.fontSize);
+  const [unifiedMode, setUnifiedMode] = useState(settings.unifiedMode);
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
   useKeepAwake();
 
   const screenWidth = Dimensions.get("window").width;
+
+  const toggleUnifiedMode = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    const next = !unifiedMode;
+    setUnifiedMode(next);
+    updateSettings({ unifiedMode: next });
+  };
 
   const cycleLayout = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -46,17 +55,18 @@ export default function MultiChatScreen() {
       case "columns": return "view-column";
       case "grid": return "view-grid";
       case "list": return "view-sequential";
-      case "merged": return "layers";
+      case "merged": return "tab";
       default: return "view-grid";
     }
   };
 
   const getLayoutLabel = (): string => {
+    if (unifiedMode) return "Unified";
     switch (layout) {
       case "columns": return "Columns";
       case "grid": return "Grid";
       case "list": return "List";
-      case "merged": return "Merged";
+      case "merged": return "Tabs";
       default: return "";
     }
   };
@@ -78,10 +88,12 @@ export default function MultiChatScreen() {
       );
     }
 
+    if (unifiedMode) {
+      return <UnifiedChatView chats={activeChats} fontSize={fontSize} />;
+    }
+
     if (layout === "merged") {
-      return (
-        <MergedChatView chats={activeChats} fontSize={fontSize} />
-      );
+      return <MergedChatView chats={activeChats} fontSize={fontSize} />;
     }
 
     if (layout === "list") {
@@ -89,12 +101,7 @@ export default function MultiChatScreen() {
         <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.listLayout}>
           {activeChats.map((chat) => (
             <View key={chat.id} style={styles.listItem}>
-              <ChatWebView
-                chat={chat}
-                compact
-                fontSize={fontSize}
-                onPin={() => togglePin(chat.id)}
-              />
+              <ChatWebView chat={chat} compact fontSize={fontSize} onPin={() => togglePin(chat.id)} />
             </View>
           ))}
         </ScrollView>
@@ -109,12 +116,7 @@ export default function MultiChatScreen() {
         <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.gridLayout}>
           {activeChats.map((chat) => (
             <View key={chat.id} style={[styles.gridItem, { width: cols > 1 ? chatWidth : "100%" }]}>
-              <ChatWebView
-                chat={chat}
-                compact
-                fontSize={fontSize}
-                onPin={() => togglePin(chat.id)}
-              />
+              <ChatWebView chat={chat} compact fontSize={fontSize} onPin={() => togglePin(chat.id)} />
             </View>
           ))}
         </ScrollView>
@@ -125,11 +127,7 @@ export default function MultiChatScreen() {
       <View style={styles.columnsLayout}>
         {activeChats.map((chat) => (
           <View key={chat.id} style={styles.columnItem}>
-            <ChatWebView
-              chat={chat}
-              fontSize={fontSize}
-              onPin={() => togglePin(chat.id)}
-            />
+            <ChatWebView chat={chat} fontSize={fontSize} onPin={() => togglePin(chat.id)} />
           </View>
         ))}
       </View>
@@ -161,10 +159,32 @@ export default function MultiChatScreen() {
             <Pressable onPress={() => adjustFontSize(2)} hitSlop={8} style={styles.toolBtn}>
               <MaterialCommunityIcons name="format-font-size-increase" size={18} color={Colors.dark.textSecondary} />
             </Pressable>
-            <Pressable onPress={cycleLayout} hitSlop={8} style={styles.toolBtn}>
-              <MaterialCommunityIcons name={getLayoutIcon() as any} size={18} color={Colors.dark.primary} />
-            </Pressable>
+            {!unifiedMode && (
+              <Pressable onPress={cycleLayout} hitSlop={8} style={styles.toolBtn}>
+                <MaterialCommunityIcons name={getLayoutIcon() as any} size={18} color={Colors.dark.primary} />
+              </Pressable>
+            )}
           </View>
+        </Animated.View>
+      )}
+
+      {showControls && (
+        <Animated.View
+          entering={FadeIn.duration(200)}
+          exiting={FadeOut.duration(200)}
+          style={styles.unifiedToggleBar}
+        >
+          <Ionicons name="layers" size={16} color={unifiedMode ? Colors.dark.primary : Colors.dark.textMuted} />
+          <Text style={[styles.unifiedToggleText, unifiedMode && styles.unifiedToggleTextActive]}>
+            Unified Mode
+          </Text>
+          <Switch
+            value={unifiedMode}
+            onValueChange={toggleUnifiedMode}
+            trackColor={{ false: Colors.dark.border, true: Colors.dark.primary + "60" }}
+            thumbColor={unifiedMode ? Colors.dark.primary : Colors.dark.textMuted}
+            style={{ transform: [{ scale: 0.8 }] }}
+          />
         </Animated.View>
       )}
 
@@ -223,6 +243,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: 8,
+  },
+  unifiedToggleBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    backgroundColor: Colors.dark.surface,
+    borderBottomWidth: 1,
+    borderBottomColor: Colors.dark.borderLight,
+  },
+  unifiedToggleText: {
+    flex: 1,
+    fontSize: 13,
+    fontFamily: "Inter_500Medium",
+    color: Colors.dark.textMuted,
+  },
+  unifiedToggleTextActive: {
+    color: Colors.dark.primary,
+    fontFamily: "Inter_600SemiBold",
   },
   chatArea: {
     flex: 1,

@@ -15,6 +15,7 @@ export interface AppSettings {
   fontSize: number;
   streamerMode: boolean;
   keepScreenOn: boolean;
+  unifiedMode: boolean;
 }
 
 const CHATS_KEY = "@streamchat_chats";
@@ -25,6 +26,7 @@ const defaultSettings: AppSettings = {
   fontSize: 14,
   streamerMode: false,
   keepScreenOn: true,
+  unifiedMode: false,
 };
 
 function generateId(): string {

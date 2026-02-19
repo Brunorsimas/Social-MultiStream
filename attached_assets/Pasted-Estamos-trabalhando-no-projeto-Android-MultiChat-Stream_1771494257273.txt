@@ -1,0 +1,180 @@
+Estamos trabalhando no projeto Android MultiChat Stream Viewer, desenvolvido em:
+
+Kotlin
+
+Jetpack Compose
+
+MVVM
+
+Room
+
+Hilt
+
+Coroutines + Flow
+
+O app já possui:
+
+Cadastro de múltiplos chats
+
+WebView por chat
+
+Modo multichat (várias janelas simultâneas)
+
+Sistema de autenticação condicional
+
+Atualização em tempo real
+
+🎯 Objetivo da Tarefa
+
+Adicionar uma nova funcionalidade opcional chamada:
+
+Modo Chat Unificado
+
+Quando ativado, o app deve:
+
+Combinar todas as mensagens dos chats ativos
+
+Exibir tudo em UMA única janela
+
+Manter identificação visual de origem (plataforma + nome do chat)
+
+Ordenar mensagens por timestamp
+
+Atualizar em tempo real
+
+Sem remover ou quebrar o modo multichat atual.
+
+🧩 Requisitos Funcionais
+1️⃣ Toggle de Ativação
+
+Adicionar um toggle na tela Multichat:
+
+Switch: “Modo Unificado”
+
+Persistir escolha no Room ou DataStore
+
+Alternância dinâmica sem reiniciar tela
+
+2️⃣ Estrutura de Dados
+
+Criar modelo:
+
+data class UnifiedMessage(
+    val id: String,
+    val chatId: String,
+    val chatName: String,
+    val platform: String,
+    val username: String,
+    val avatarUrl: String?,
+    val message: String,
+    val timestamp: Long
+)
+
+3️⃣ Agregação de Mensagens
+
+Cada ChatWebViewComponent já emite mensagens via Flow.
+
+Criar no ViewModel:
+
+Um método que combine múltiplos Flows usando:
+
+combine()
+
+
+Emitir lista unificada ordenada por timestamp
+
+Limitar histórico a 500 mensagens
+
+Remover mensagens antigas automaticamente
+
+Não bloquear thread principal.
+
+4️⃣ Nova Tela Compose
+
+Criar:
+
+UnifiedChatScreen()
+
+
+Com:
+
+LazyColumn
+
+Scroll automático
+
+Botão para pausar scroll
+
+Indicador visual por plataforma (cor ou ícone)
+
+Nome do chat exibido junto ao usuário
+
+Layout esperado por item:
+
+[Ícone Plataforma] Usuário (Nome do Chat)
+Mensagem
+
+5️⃣ Performance
+
+Garantir:
+
+Uso eficiente de memória
+
+Nenhuma duplicação de mensagens
+
+Atualização fluida
+
+Uso de StateFlow
+
+Uso de rememberLazyListState()
+
+6️⃣ Persistência
+
+Salvar no banco ou DataStore:
+
+Estado do modo unificado (ativo/inativo)
+
+7️⃣ Não Quebrar
+
+Não modificar autenticação existente
+
+Não alterar WebView original
+
+Não afetar modo multichat padrão
+
+🧪 Testes
+
+Criar testes unitários para:
+
+Merge correto de mensagens
+
+Ordenação
+
+Limite de 500 mensagens
+
+Alternância do modo
+
+📦 Entrega Esperada
+
+Código completo da feature
+
+ViewModel atualizado
+
+Tela Compose funcional
+
+Integração com navegação atual
+
+Sem warnings críticos
+
+Código limpo e modular
+
+⚠️ Regras
+
+Não simplificar a lógica
+
+Manter padrão MVVM
+
+Usar boas práticas Kotlin
+
+Seguir Clean Architecture existente
+
+Comentar apenas lógica complexa
