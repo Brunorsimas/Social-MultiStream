@@ -18,6 +18,7 @@ export default function MultiChatScreen() {
   const insets = useSafeAreaInsets();
   const { activeChats, settings, updateSettings, togglePin } = useChats();
   const [showControls, setShowControls] = useState(true);
+  const [fullscreen, setFullscreen] = useState(false);
   const [layout, setLayout] = useState<LayoutMode>(settings.layout);
   const [fontSize, setFontSize] = useState(settings.fontSize);
   const [unifiedMode, setUnifiedMode] = useState(settings.unifiedMode);
@@ -94,6 +95,13 @@ export default function MultiChatScreen() {
           chats={activeChats}
           fontSize={fontSize}
           onFontSizeChange={adjustFontSize}
+          isFullscreen={fullscreen}
+          onToggleFullscreen={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            const next = !fullscreen;
+            setFullscreen(next);
+            setShowControls(!next);
+          }}
         />
       );
     }

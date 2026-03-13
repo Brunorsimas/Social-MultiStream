@@ -19,6 +19,8 @@ interface UnifiedTimelineProps {
   chats: ChatConfig[];
   fontSize?: number;
   onFontSizeChange?: (delta: number) => void;
+  onToggleFullscreen?: () => void;
+  isFullscreen?: boolean;
 }
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -94,6 +96,8 @@ export default function UnifiedTimeline({
   chats,
   fontSize = 14,
   onFontSizeChange,
+  onToggleFullscreen,
+  isFullscreen = false,
 }: UnifiedTimelineProps) {
   const [messages, setMessages] = useState<UnifiedChatMessage[]>(
     globalAggregator.getMessages()
@@ -243,8 +247,19 @@ export default function UnifiedTimeline({
         >
           <Text style={styles.fontLabel}>+</Text>
         </Pressable>
-        <Pressable onPress={clearMessages} hitSlop={10} style={styles.barBtn}>
-          <Ionicons name="arrow-down-circle-outline" size={22} color={Colors.dark.textSecondary} />
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+            onToggleFullscreen?.();
+          }}
+          hitSlop={10}
+          style={styles.barBtn}
+        >
+          <Ionicons
+            name={isFullscreen ? "contract" : "expand"}
+            size={22}
+            color={isFullscreen ? Colors.dark.primary : Colors.dark.textSecondary}
+          />
         </Pressable>
       </View>
     </View>
