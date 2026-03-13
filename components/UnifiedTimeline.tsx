@@ -1,10 +1,16 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
-import { View, Text, FlatList, Pressable, StyleSheet, Image, Platform } from "react-native";
-import { Ionicons, FontAwesome5, MaterialCommunityIcons } from "@expo/vector-icons";
+import {
+  View,
+  Text,
+  FlatList,
+  Pressable,
+  StyleSheet,
+  Image,
+  Platform,
+} from "react-native";
+import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Animated, { FadeIn, SlideInRight } from "react-native-reanimated";
 import Colors from "@/constants/colors";
-import PlatformBadge from "./PlatformBadge";
 import HiddenChatCollector from "./HiddenChatCollector";
 import { ChatConfig } from "@/lib/storage";
 import { globalAggregator, UnifiedChatMessage } from "@/lib/message-aggregator";
@@ -12,9 +18,20 @@ import { globalAggregator, UnifiedChatMessage } from "@/lib/message-aggregator";
 interface UnifiedTimelineProps {
   chats: ChatConfig[];
   fontSize?: number;
+  onFontSizeChange?: (delta: number) => void;
 }
 
-const platformColors: Record<string, string> = {
+const PLATFORM_LABEL: Record<string, string> = {
+  twitch: "TWITCH",
+  youtube: "YOUTUBE",
+  kick: "KICK",
+  facebook: "FACEBOOK",
+  tiktok: "TIKTOK",
+  unknown: "CHAT",
+  other: "CHAT",
+};
+
+const PLATFORM_COLOR: Record<string, string> = {
   twitch: Colors.dark.twitch,
   youtube: Colors.dark.youtube,
   kick: Colors.dark.kick,
@@ -24,52 +41,89 @@ const platformColors: Record<string, string> = {
   other: Colors.dark.primary,
 };
 
-interface MessageItemProps {
-  item: UnifiedChatMessage;
-}
-
-function MessageItem({ item }: MessageItemProps) {
-  const color = platformColors[item.platform] || Colors.dark.primary;
-
+function AvatarPlaceholder({ name, color }: { name: string; color: string }) {
+  const initials = name ? name.charAt(0).toUpperCase() : "?";
   return (
-    <View style={[styles.messageRow, { borderLeftColor: color }]}>
-      <View style={styles.messageHeader}>
-        <View style={[styles.platformDot, { backgroundColor: color }]} />
-        <Text style={[styles.userName, { color }]} numberOfLines={1}>
-          {item.userName}
-        </Text>
-        <Text style={styles.chatOrigin} numberOfLines={1}>
-          {item.chatName}
-        </Text>
-        <Text style={styles.messageTime}>
-          {new Date(item.timestamp).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" })}
-        </Text>
-      </View>
-      <Text style={styles.messageText}>{item.message}</Text>
+    <View style={[styles.avatar, { backgroundColor: color + "30" }]}>
+      <Text style={[styles.avatarText, { color }]}>{initials}</Text>
     </View>
   );
 }
 
-export default function UnifiedTimeline({ chats, fontSize = 14 }: UnifiedTimelineProps) {
-  const [messages, setMessages] = useState<UnifiedChatMessage[]>(globalAggregator.getMessages());
-  const [autoScroll, setAutoScroll] = useState(true);
-  const [isAtBottom, setIsAtBottom] = useState(true);
+function PlatformPill({ platform }: { platform: string }) {
+  const label = PLATFORM_LABEL[platform] || "CHAT";
+  const color = PLATFORM_COLOR[platform] || Colors.dark.primary;
+  return (
+    <View style={[styles.platformPill, { backgroundColor: color }]}>
+      <Text style={styles.platformPillText}>{label}</Text>
+    </View>
+  );
+}
+
+interface MessageItemProps {
+  item: UnifiedChatMessage;
+  fontSize: number;
+}
+
+function MessageItem({ item, fontSize }: MessageItemProps) {
+  const color = PLATFORM_COLOR[item.platform] || Colors.dark.primary;
+  const timeStr = new Date(item.timestamp).toLocaleTimeString([], {
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  });
+
+  return (
+    <View style={styles.messageRow}>
+      <AvatarPlaceholder name={item.userName} color={color} />
+      <View style={styles.messageBody}>
+        <View style={styles.messageTopRow}>
+          <PlatformPill platform={item.platform} />
+          <Text style={[styles.userName, { color }]} numberOfLines={1}>
+            {item.userName}
+          </Text>
+          <Text style={styles.messageTime}>{timeStr}</Text>
+        </View>
+        <Text style={[styles.messageText, { fontSize }]}>{item.message}</Text>
+      </View>
+    </View>
+  );
+}
+
+export default function UnifiedTimeline({
+  chats,
+  fontSize = 14,
+  onFontSizeChange,
+}: UnifiedTimelineProps) {
+  const [messages, setMessages] = useState<UnifiedChatMessage[]>(
+    globalAggregator.getMessages()
+  );
+  const [paused, setPaused] = useState(false);
+  const [hasNew, setHasNew] = useState(false);
   const flatListRef = useRef<FlatList>(null);
+  const pausedRef = useRef(false);
 
   useEffect(() => {
-    const unsubscribe = globalAggregator.subscribe((msgs) => {
+    pausedRef.current = paused;
+  }, [paused]);
+
+  useEffect(() => {
+    const unsub = globalAggregator.subscribe((msgs) => {
       setMessages(msgs);
+      if (pausedRef.current) {
+        setHasNew(true);
+      }
     });
-    return unsubscribe;
+    return unsub;
   }, []);
 
   useEffect(() => {
-    if (autoScroll && isAtBottom && messages.length > 0) {
+    if (!paused && messages.length > 0) {
       setTimeout(() => {
         flatListRef.current?.scrollToEnd({ animated: true });
-      }, 100);
+      }, 80);
     }
-  }, [messages.length, autoScroll, isAtBottom]);
+  }, [messages.length, paused]);
 
   useEffect(() => {
     return () => {
@@ -77,31 +131,43 @@ export default function UnifiedTimeline({ chats, fontSize = 14 }: UnifiedTimelin
     };
   }, []);
 
-  const handleScroll = useCallback((event: any) => {
-    const { contentOffset, contentSize, layoutMeasurement } = event.nativeEvent;
-    const distFromBottom = contentSize.height - layoutMeasurement.height - contentOffset.y;
-    setIsAtBottom(distFromBottom < 80);
-  }, []);
-
-  const toggleAutoScroll = () => {
+  const togglePause = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    const next = !autoScroll;
-    setAutoScroll(next);
-    if (next) {
-      flatListRef.current?.scrollToEnd({ animated: true });
-    }
+    setPaused((p) => {
+      if (p) {
+        setHasNew(false);
+        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+      }
+      return !p;
+    });
+  };
+
+  const resumeAndScroll = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setPaused(false);
+    setHasNew(false);
+    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
   };
 
   const clearMessages = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     globalAggregator.clear();
+    setHasNew(false);
   };
 
-  const renderMessage = useCallback(({ item }: { item: UnifiedChatMessage }) => {
-    return <MessageItem item={item} />;
-  }, []);
+  const renderItem = useCallback(
+    ({ item }: { item: UnifiedChatMessage }) => (
+      <MessageItem item={item} fontSize={fontSize} />
+    ),
+    [fontSize]
+  );
 
-  const keyExtractor = useCallback((item: UnifiedChatMessage) => item.messageId, []);
+  const keyExtractor = useCallback(
+    (item: UnifiedChatMessage) => item.messageId,
+    []
+  );
+
+  const totalConnected = chats.length;
 
   return (
     <View style={styles.container}>
@@ -109,31 +175,12 @@ export default function UnifiedTimeline({ chats, fontSize = 14 }: UnifiedTimelin
         <HiddenChatCollector key={chat.id} chat={chat} fontSize={fontSize} />
       ))}
 
-      <View style={styles.header}>
-        <Ionicons name="git-merge" size={16} color={Colors.dark.primary} />
-        <Text style={styles.headerTitle}>Live Timeline</Text>
-        <View style={styles.statsRow}>
-          {chats.map((chat) => (
-            <View key={chat.id} style={styles.sourceDot}>
-              <View style={[styles.liveDot, { backgroundColor: platformColors[chat.platform] || Colors.dark.primary }]} />
-              <Text style={styles.sourceText} numberOfLines={1}>{chat.name}</Text>
-            </View>
-          ))}
-        </View>
-        <View style={styles.headerSpacer} />
-        <View style={styles.headerStats}>
-          <Text style={styles.msgCount}>{messages.length}</Text>
-        </View>
-        <Pressable onPress={clearMessages} hitSlop={8} style={styles.headerBtn}>
-          <Ionicons name="trash-outline" size={16} color={Colors.dark.textMuted} />
-        </Pressable>
-        <Pressable onPress={toggleAutoScroll} hitSlop={8} style={styles.headerBtn}>
-          <Ionicons
-            name={autoScroll ? "pause" : "play"}
-            size={16}
-            color={autoScroll ? Colors.dark.primary : Colors.dark.warning}
-          />
-        </Pressable>
+      <View style={styles.topBar}>
+        <View style={styles.liveDot} />
+        <Text style={styles.liveText}>Live</Text>
+        <Text style={styles.connectedText}>
+          {" "}• {totalConnected} Connected
+        </Text>
       </View>
 
       {messages.length === 0 ? (
@@ -141,47 +188,65 @@ export default function UnifiedTimeline({ chats, fontSize = 14 }: UnifiedTimelin
           <Ionicons name="radio-outline" size={40} color={Colors.dark.textMuted} />
           <Text style={styles.emptyTitle}>Waiting for messages...</Text>
           <Text style={styles.emptyDesc}>
-            Messages from {chats.length} chat{chats.length !== 1 ? "s" : ""} will appear here in real time
+            Messages from {chats.length} active chat
+            {chats.length !== 1 ? "s" : ""} will appear here in real time.
           </Text>
-          <View style={styles.sourcesPreview}>
-            {chats.map((chat) => (
-              <View key={chat.id} style={[styles.sourceChip, { borderColor: platformColors[chat.platform] || Colors.dark.primary }]}>
-                <PlatformBadge platform={chat.platform} size={10} />
-                <Text style={styles.sourceChipText} numberOfLines={1}>{chat.name}</Text>
-              </View>
-            ))}
-          </View>
         </View>
       ) : (
         <FlatList
           ref={flatListRef}
           data={messages}
-          renderItem={renderMessage}
+          renderItem={renderItem}
           keyExtractor={keyExtractor}
-          style={styles.messageList}
-          contentContainerStyle={styles.messageListContent}
-          onScroll={handleScroll}
-          scrollEventThrottle={100}
+          style={styles.list}
+          contentContainerStyle={styles.listContent}
           showsVerticalScrollIndicator={false}
           initialNumToRender={30}
           maxToRenderPerBatch={20}
           windowSize={15}
           removeClippedSubviews={Platform.OS !== "web"}
+          scrollEnabled={!paused}
         />
       )}
 
-      {!autoScroll && messages.length > 0 && (
-        <Pressable
-          onPress={() => {
-            setAutoScroll(true);
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }}
-          style={styles.scrollToBottomBtn}
-        >
-          <Ionicons name="arrow-down" size={16} color={Colors.dark.text} />
-          <Text style={styles.scrollBtnText}>New messages</Text>
+      {(paused || hasNew) && (
+        <Pressable onPress={resumeAndScroll} style={styles.newMsgBtn}>
+          <Ionicons name="arrow-down" size={14} color="#fff" />
+          <Text style={styles.newMsgText}>
+            {paused ? "New messages paused" : "New messages"}
+          </Text>
         </Pressable>
       )}
+
+      <View style={styles.bottomBar}>
+        <Pressable onPress={togglePause} hitSlop={10} style={styles.barBtn}>
+          <Ionicons
+            name={paused ? "play" : "pause"}
+            size={20}
+            color={paused ? Colors.dark.warning : Colors.dark.textSecondary}
+          />
+        </Pressable>
+        <Pressable
+          onPress={() => onFontSizeChange?.(-1)}
+          hitSlop={10}
+          style={styles.barBtn}
+        >
+          <Text style={styles.fontLabel}>−</Text>
+        </Pressable>
+        <View style={styles.aaLabel}>
+          <Text style={styles.aaText}>Aa</Text>
+        </View>
+        <Pressable
+          onPress={() => onFontSizeChange?.(1)}
+          hitSlop={10}
+          style={styles.barBtn}
+        >
+          <Text style={styles.fontLabel}>+</Text>
+        </Pressable>
+        <Pressable onPress={clearMessages} hitSlop={10} style={styles.barBtn}>
+          <Ionicons name="arrow-down-circle-outline" size={22} color={Colors.dark.textSecondary} />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -189,75 +254,109 @@ export default function UnifiedTimeline({ chats, fontSize = 14 }: UnifiedTimelin
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: "#111118",
     borderRadius: 12,
     overflow: "hidden",
-    borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
   },
-  header: {
+
+  topBar: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: "#111118",
     borderBottomWidth: 1,
     borderBottomColor: Colors.dark.borderLight,
-    flexWrap: "wrap",
-  },
-  headerTitle: {
-    fontSize: 13,
-    fontFamily: "Inter_700Bold",
-    color: Colors.dark.text,
-  },
-  statsRow: {
-    flexDirection: "row",
-    gap: 8,
-    flexShrink: 1,
-  },
-  sourceDot: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 4,
   },
   liveDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: Colors.dark.kick,
+    marginRight: 6,
   },
-  sourceText: {
-    fontSize: 10,
+  liveText: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.dark.kick,
+  },
+  connectedText: {
+    fontSize: 13,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
-    maxWidth: 60,
+    color: Colors.dark.kick,
   },
-  headerSpacer: {
+
+  list: {
     flex: 1,
   },
-  headerStats: {
-    backgroundColor: Colors.dark.primary + "20",
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 10,
+  listContent: {
+    paddingVertical: 6,
+    paddingHorizontal: 4,
   },
-  msgCount: {
-    fontSize: 11,
-    fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.primary,
+
+  messageRow: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 10,
   },
-  headerBtn: {
-    width: 30,
-    height: 30,
+  avatar: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
     alignItems: "center",
     justifyContent: "center",
-    borderRadius: 6,
+    flexShrink: 0,
   },
+  avatarText: {
+    fontSize: 16,
+    fontFamily: "Inter_700Bold",
+  },
+  messageBody: {
+    flex: 1,
+  },
+  messageTopRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 6,
+    marginBottom: 3,
+  },
+  platformPill: {
+    paddingHorizontal: 7,
+    paddingVertical: 2,
+    borderRadius: 5,
+    flexShrink: 0,
+  },
+  platformPillText: {
+    fontSize: 9,
+    fontFamily: "Inter_700Bold",
+    color: "#fff",
+    letterSpacing: 0.5,
+  },
+  userName: {
+    fontSize: 13,
+    fontFamily: "Inter_600SemiBold",
+    flexShrink: 1,
+  },
+  messageTime: {
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.dark.textMuted,
+    marginLeft: "auto" as any,
+    flexShrink: 0,
+  },
+  messageText: {
+    fontFamily: "Inter_400Regular",
+    color: Colors.dark.text,
+    lineHeight: 20,
+  },
+
   emptyState: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    gap: 8,
+    gap: 10,
     paddingHorizontal: 32,
   },
   emptyTitle: {
@@ -273,100 +372,62 @@ const styles = StyleSheet.create({
     textAlign: "center",
     lineHeight: 18,
   },
-  sourcesPreview: {
-    flexDirection: "row",
-    flexWrap: "wrap",
-    gap: 6,
-    marginTop: 12,
-    justifyContent: "center",
-  },
-  sourceChip: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 16,
-    borderWidth: 1,
-    backgroundColor: Colors.dark.background,
-  },
-  sourceChipText: {
-    fontSize: 11,
-    fontFamily: "Inter_500Medium",
-    color: Colors.dark.textSecondary,
-    maxWidth: 80,
-  },
-  messageList: {
-    flex: 1,
-  },
-  messageListContent: {
-    paddingVertical: 4,
-  },
-  messageRow: {
-    paddingHorizontal: 12,
-    paddingVertical: 6,
-    borderLeftWidth: 3,
-    marginHorizontal: 4,
-    marginVertical: 1,
-    borderRadius: 4,
-    backgroundColor: Colors.dark.background + "80",
-  },
-  messageHeader: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: 6,
-    marginBottom: 2,
-  },
-  platformDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
-  userName: {
-    fontSize: 12,
-    fontFamily: "Inter_700Bold",
-    flexShrink: 0,
-  },
-  chatOrigin: {
-    fontSize: 10,
-    fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
-    flexShrink: 1,
-    maxWidth: 100,
-  },
-  messageTime: {
-    fontSize: 9,
-    fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
-    marginLeft: "auto" as any,
-  },
-  messageText: {
-    fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    color: Colors.dark.text,
-    lineHeight: 18,
-    paddingLeft: 14,
-  },
-  scrollToBottomBtn: {
+
+  newMsgBtn: {
     position: "absolute",
-    bottom: 12,
+    bottom: 70,
     alignSelf: "center",
     flexDirection: "row",
     alignItems: "center",
-    gap: 6,
-    backgroundColor: Colors.dark.primary,
-    paddingVertical: 8,
-    paddingHorizontal: 16,
-    borderRadius: 20,
+    gap: 8,
+    backgroundColor: "#00BFA5",
+    paddingVertical: 12,
+    paddingHorizontal: 22,
+    borderRadius: 30,
     shadowColor: "#000",
-    shadowOffset: { width: 0, height: 2 },
+    shadowOffset: { width: 0, height: 3 },
     shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 4,
+    shadowRadius: 6,
+    elevation: 6,
   },
-  scrollBtnText: {
-    fontSize: 12,
+  newMsgText: {
+    fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.background,
+    color: "#fff",
+  },
+
+  bottomBar: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-around",
+    paddingHorizontal: 20,
+    paddingVertical: 12,
+    backgroundColor: Colors.dark.surfaceElevated,
+    borderTopWidth: 1,
+    borderTopColor: Colors.dark.border,
+    borderRadius: 20,
+    margin: 8,
+    marginTop: 0,
+  },
+  barBtn: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+    borderRadius: 22,
+  },
+  fontLabel: {
+    fontSize: 22,
+    color: Colors.dark.textSecondary,
+    fontFamily: "Inter_400Regular",
+    lineHeight: 26,
+  },
+  aaLabel: {
+    paddingHorizontal: 4,
+  },
+  aaText: {
+    fontSize: 16,
+    fontFamily: "Inter_600SemiBold",
+    color: Colors.dark.textSecondary,
   },
 });

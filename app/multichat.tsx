@@ -9,7 +9,7 @@ import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import Colors from "@/constants/colors";
 import ChatWebView from "@/components/ChatWebView";
 import MergedChatView from "@/components/MergedChatView";
-import UnifiedChatView from "@/components/UnifiedChatView";
+import UnifiedTimeline from "@/components/UnifiedTimeline";
 import { useChats } from "@/lib/chat-context";
 
 type LayoutMode = "columns" | "grid" | "list" | "merged";
@@ -89,7 +89,13 @@ export default function MultiChatScreen() {
     }
 
     if (unifiedMode) {
-      return <UnifiedChatView chats={activeChats} fontSize={fontSize} />;
+      return (
+        <UnifiedTimeline
+          chats={activeChats}
+          fontSize={fontSize}
+          onFontSizeChange={adjustFontSize}
+        />
+      );
     }
 
     if (layout === "merged") {
@@ -188,23 +194,31 @@ export default function MultiChatScreen() {
         </Animated.View>
       )}
 
-      <View style={[styles.chatArea, !showControls && { paddingTop: insets.top + webTopInset }]}>
+      <View
+        style={[
+          styles.chatArea,
+          unifiedMode && styles.chatAreaUnified,
+          !showControls && { paddingTop: insets.top + webTopInset },
+        ]}
+      >
         {renderChats()}
       </View>
 
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          setShowControls(!showControls);
-        }}
-        style={[styles.toggleFab, { bottom: insets.bottom + 16 }]}
-      >
-        <Ionicons
-          name={showControls ? "eye-off" : "eye"}
-          size={20}
-          color={Colors.dark.text}
-        />
-      </Pressable>
+      {!unifiedMode && (
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            setShowControls(!showControls);
+          }}
+          style={[styles.toggleFab, { bottom: insets.bottom + 16 }]}
+        >
+          <Ionicons
+            name={showControls ? "eye-off" : "eye"}
+            size={20}
+            color={Colors.dark.text}
+          />
+        </Pressable>
+      )}
     </View>
   );
 }
@@ -267,6 +281,9 @@ const styles = StyleSheet.create({
   chatArea: {
     flex: 1,
     padding: 8,
+  },
+  chatAreaUnified: {
+    padding: 0,
   },
   columnsLayout: {
     flex: 1,
