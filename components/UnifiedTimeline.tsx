@@ -5,7 +5,6 @@ import {
   FlatList,
   Pressable,
   StyleSheet,
-  Image,
   Platform,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
@@ -129,11 +128,6 @@ export default function UnifiedTimeline({
     }
   }, [messages.length, paused]);
 
-  useEffect(() => {
-    return () => {
-      globalAggregator.clear();
-    };
-  }, []);
 
   const togglePause = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -209,7 +203,6 @@ export default function UnifiedTimeline({
           maxToRenderPerBatch={20}
           windowSize={15}
           removeClippedSubviews={Platform.OS !== "web"}
-          scrollEnabled={!paused}
         />
       )}
 

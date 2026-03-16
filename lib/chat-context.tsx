@@ -35,6 +35,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     fontSize: 14,
     streamerMode: false,
     keepScreenOn: true,
+    unifiedMode: false,
   });
   const [isLoading, setIsLoading] = useState(true);
 

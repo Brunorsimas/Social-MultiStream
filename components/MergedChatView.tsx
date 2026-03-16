@@ -39,7 +39,8 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
     Object.fromEntries(chats.map((c) => [c.id, true]))
   );
 
-  const activeChat = chats[activeIndex] || chats[0];
+  const safeIndex = Math.min(activeIndex, chats.length - 1);
+  const activeChat = chats[safeIndex] || chats[0];
 
   if (!activeChat) return null;
 
@@ -68,7 +69,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
           renderItem={({ item, index }) => (
             <TabItem
               chat={item}
-              isActive={index === activeIndex}
+              isActive={index === safeIndex}
               onPress={() => setActiveIndex(index)}
             />
           )}
@@ -78,7 +79,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
       <View style={styles.chatContainer}>
         {chats.map((chat, index) => {
           const embedUrl = getChatEmbedUrl(chat.url);
-          const isVisible = index === activeIndex;
+          const isVisible = index === safeIndex;
 
           if (Platform.OS === "web") {
             return (
@@ -133,7 +134,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
         {chats.map((_, index) => (
           <View
             key={index}
-            style={[styles.dot, index === activeIndex && styles.dotActive]}
+            style={[styles.dot, index === safeIndex && styles.dotActive]}
           />
         ))}
       </View>

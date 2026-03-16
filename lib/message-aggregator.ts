@@ -19,6 +19,7 @@ export class MessageAggregator {
   private listeners: Set<(messages: UnifiedChatMessage[]) => void> = new Set();
 
   addMessage(msg: UnifiedChatMessage): void {
+    if (!msg.message || !msg.message.trim()) return;
     if (this.seenIds.has(msg.messageId)) return;
 
     this.seenIds.add(msg.messageId);
@@ -37,6 +38,7 @@ export class MessageAggregator {
   addMessages(msgs: UnifiedChatMessage[]): void {
     let changed = false;
     for (const msg of msgs) {
+      if (!msg.message || !msg.message.trim()) continue;
       if (this.seenIds.has(msg.messageId)) continue;
       this.seenIds.add(msg.messageId);
       this.messages.push(msg);

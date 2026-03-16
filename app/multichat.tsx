@@ -33,6 +33,10 @@ export default function MultiChatScreen() {
     const next = !unifiedMode;
     setUnifiedMode(next);
     updateSettings({ unifiedMode: next });
+    if (!next) {
+      setFullscreen(false);
+      setShowControls(true);
+    }
   };
 
   const cycleLayout = () => {
@@ -167,10 +171,10 @@ export default function MultiChatScreen() {
           </View>
 
           <View style={styles.toolbarActions}>
-            <Pressable onPress={() => adjustFontSize(-2)} hitSlop={8} style={styles.toolBtn}>
+            <Pressable onPress={() => adjustFontSize(-1)} hitSlop={8} style={styles.toolBtn}>
               <MaterialCommunityIcons name="format-font-size-decrease" size={18} color={Colors.dark.textSecondary} />
             </Pressable>
-            <Pressable onPress={() => adjustFontSize(2)} hitSlop={8} style={styles.toolBtn}>
+            <Pressable onPress={() => adjustFontSize(1)} hitSlop={8} style={styles.toolBtn}>
               <MaterialCommunityIcons name="format-font-size-increase" size={18} color={Colors.dark.textSecondary} />
             </Pressable>
             {!unifiedMode && (
