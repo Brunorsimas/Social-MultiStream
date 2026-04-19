@@ -12,6 +12,7 @@ export interface UnifiedChatMessage {
 }
 
 const MAX_MESSAGES = 500;
+const MAX_SEEN_IDS = 5000;
 const NOTIFY_THROTTLE_MS = 150;
 
 export class MessageAggregator {
@@ -19,7 +20,6 @@ export class MessageAggregator {
   private seenIds: Set<string> = new Set();
   private listeners: Set<(messages: UnifiedChatMessage[]) => void> = new Set();
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
-  private pendingNotify = false;
 
   addMessage(msg: UnifiedChatMessage): void {
     if (!msg.message || !msg.message.trim()) return;
@@ -27,14 +27,13 @@ export class MessageAggregator {
 
     this.seenIds.add(msg.messageId);
     this.messages.push(msg);
-
     this.messages.sort((a, b) => a.timestamp - b.timestamp);
 
     if (this.messages.length > MAX_MESSAGES) {
-      const removed = this.messages.splice(0, this.messages.length - MAX_MESSAGES);
-      removed.forEach((m) => this.seenIds.delete(m.messageId));
+      this.messages.splice(0, this.messages.length - MAX_MESSAGES);
     }
 
+    this.trimSeenIds();
     this.scheduleNotify();
   }
 
@@ -52,10 +51,10 @@ export class MessageAggregator {
       this.messages.sort((a, b) => a.timestamp - b.timestamp);
 
       if (this.messages.length > MAX_MESSAGES) {
-        const removed = this.messages.splice(0, this.messages.length - MAX_MESSAGES);
-        removed.forEach((m) => this.seenIds.delete(m.messageId));
+        this.messages.splice(0, this.messages.length - MAX_MESSAGES);
       }
 
+      this.trimSeenIds();
       this.scheduleNotify();
     }
   }
@@ -79,6 +78,13 @@ export class MessageAggregator {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  private trimSeenIds(): void {
+    if (this.seenIds.size > MAX_SEEN_IDS) {
+      const arr = Array.from(this.seenIds);
+      this.seenIds = new Set(arr.slice(arr.length - MAX_SEEN_IDS));
+    }
   }
 
   private scheduleNotify(): void {
