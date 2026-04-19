@@ -1,101 +1,91 @@
 export function getTwitchScraper(chatId: string, chatName: string): string {
   return `
 (function() {
-  if (window.__streamchat_observer) return true;
-  window.__streamchat_observer = true;
+  if (window.__streamchat_init) return true;
+  window.__streamchat_init = true;
 
-  var lastSent = new Set();
-  var firstSeen = {};
-  var debounceTimer = null;
+  var sent = new Set();
 
-  function scrapeMessages() {
+  function processElement(el) {
+    var userEl = el.querySelector
+      ? el.querySelector('[class*="chat-author__display-name"], .chat-author__display-name, [data-a-target="chat-message-username"]')
+      : null;
+    var msgEl = el.querySelector
+      ? el.querySelector('[class*="text-fragment"], .text-fragment, [data-a-target="chat-message-text"]')
+      : null;
+
+    var userName, message;
+
+    if (userEl && msgEl) {
+      userName = userEl.textContent.trim();
+      message = msgEl.textContent.trim();
+    } else {
+      var allText = el.textContent ? el.textContent.trim() : '';
+      if (allText.length < 3) return null;
+      var parts = allText.split(':');
+      if (parts.length < 2) return null;
+      userName = parts[0].trim();
+      message = parts.slice(1).join(':').trim();
+    }
+
+    if (!userName || !message) return null;
+
+    var id = '${chatId}_tw_' + userName + '_' + message.substring(0, 40);
+    if (sent.has(id)) return null;
+    sent.add(id);
+
+    return {
+      messageId: id,
+      platform: 'twitch',
+      chatId: '${chatId}',
+      chatName: '${chatName}',
+      userName: userName,
+      userAvatar: null,
+      message: message,
+      timestamp: Date.now()
+    };
+  }
+
+  function sendMessages(msgs) {
+    var valid = msgs.filter(Boolean);
+    if (valid.length > 0) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: valid }));
+    }
+  }
+
+  function initialScan() {
     var items = document.querySelectorAll('[class*="chat-line__message"], .chat-line__message, [data-a-target="chat-line-message"]');
-    if (!items.length) {
-      items = document.querySelectorAll('.text-fragment, [class*="ChatLine"]');
-    }
+    if (!items.length) items = document.querySelectorAll('[class*="ChatLine"]');
+    var msgs = [];
+    items.forEach(function(el) { msgs.push(processElement(el)); });
+    sendMessages(msgs);
+  }
 
-    var messages = [];
-    items.forEach(function(el) {
-      var userEl = el.querySelector('[class*="chat-author__display-name"], .chat-author__display-name, [data-a-target="chat-message-username"]');
-      var msgEl = el.querySelector('[class*="text-fragment"], .text-fragment, [data-a-target="chat-message-text"]');
+  function setupObserver() {
+    var container = document.querySelector('[class*="chat-scrollable-area"], .chat-scrollable-area__message-container, [role="log"]');
+    if (!container) return false;
 
-      if (!userEl || !msgEl) {
-        var allText = el.textContent || '';
-        if (allText.length > 2) {
-          var parts = allText.split(':');
-          if (parts.length >= 2) {
-            var user = parts[0].trim();
-            var msg = parts.slice(1).join(':').trim();
-            if (user && msg) {
-              var id = '${chatId}_tw_' + user + '_' + msg.substring(0, 30);
-              if (!lastSent.has(id)) {
-                lastSent.add(id);
-                firstSeen[id] = Date.now();
-                messages.push({
-                  messageId: id,
-                  platform: 'twitch',
-                  chatId: '${chatId}',
-                  chatName: '${chatName}',
-                  userName: user,
-                  userAvatar: null,
-                  message: msg,
-                  timestamp: firstSeen[id]
-                });
-              }
-            }
-          }
-        }
-        return;
-      }
-
-      var userName = userEl.textContent.trim();
-      var message = msgEl.textContent.trim();
-      if (!userName || !message) return;
-
-      var id = '${chatId}_tw_' + userName + '_' + message.substring(0, 30);
-      if (lastSent.has(id)) return;
-      lastSent.add(id);
-      firstSeen[id] = Date.now();
-
-      var avatarEl = el.querySelector('img[class*="chat-badge"], img');
-      var avatar = avatarEl ? avatarEl.src : null;
-
-      messages.push({
-        messageId: id,
-        platform: 'twitch',
-        chatId: '${chatId}',
-        chatName: '${chatName}',
-        userName: userName,
-        userAvatar: avatar,
-        message: message,
-        timestamp: firstSeen[id]
+    var observer = new MutationObserver(function(mutations) {
+      var msgs = [];
+      mutations.forEach(function(mutation) {
+        mutation.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          msgs.push(processElement(node));
+        });
       });
+      sendMessages(msgs);
     });
-
-    if (messages.length > 0) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: messages }));
-    }
-
-    if (lastSent.size > 1000) {
-      var arr = Array.from(lastSent);
-      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
-      lastSent = new Set(arr.slice(arr.length - 500));
-    }
+    observer.observe(container, { childList: true, subtree: false });
+    return true;
   }
 
-  function debouncedScrape() {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(scrapeMessages, 300);
+  initialScan();
+  if (!setupObserver()) {
+    var retries = 0;
+    var interval = setInterval(function() {
+      if (setupObserver() || ++retries > 10) clearInterval(interval);
+    }, 1000);
   }
-
-  var chatContainer = document.querySelector('[class*="chat-scrollable-area"], .chat-scrollable-area__message-container, [role="log"]');
-  if (chatContainer) {
-    var observer = new MutationObserver(debouncedScrape);
-    observer.observe(chatContainer, { childList: true, subtree: false });
-  }
-
-  setInterval(scrapeMessages, 3000);
-  scrapeMessages();
 })();
 true;
 `;
@@ -104,71 +94,75 @@ true;
 export function getYouTubeScraper(chatId: string, chatName: string): string {
   return `
 (function() {
-  if (window.__streamchat_observer) return true;
-  window.__streamchat_observer = true;
+  if (window.__streamchat_init) return true;
+  window.__streamchat_init = true;
 
-  var lastSent = new Set();
-  var firstSeen = {};
-  var debounceTimer = null;
+  var sent = new Set();
 
-  function scrapeMessages() {
+  function processElement(el) {
+    var userEl = el.querySelector ? el.querySelector('#author-name') : null;
+    var msgEl = el.querySelector ? el.querySelector('#message') : null;
+    if (!userEl || !msgEl) return null;
+
+    var userName = userEl.textContent.trim();
+    var message = msgEl.textContent.trim();
+    if (!userName || !message) return null;
+
+    var id = '${chatId}_yt_' + userName + '_' + message.substring(0, 40);
+    if (sent.has(id)) return null;
+    sent.add(id);
+
+    return {
+      messageId: id,
+      platform: 'youtube',
+      chatId: '${chatId}',
+      chatName: '${chatName}',
+      userName: userName,
+      userAvatar: null,
+      message: message,
+      timestamp: Date.now()
+    };
+  }
+
+  function sendMessages(msgs) {
+    var valid = msgs.filter(Boolean);
+    if (valid.length > 0) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: valid }));
+    }
+  }
+
+  function initialScan() {
     var items = document.querySelectorAll('yt-live-chat-text-message-renderer, yt-live-chat-paid-message-renderer');
-    var messages = [];
+    var msgs = [];
+    items.forEach(function(el) { msgs.push(processElement(el)); });
+    sendMessages(msgs);
+  }
 
-    items.forEach(function(el) {
-      var userEl = el.querySelector('#author-name');
-      var msgEl = el.querySelector('#message');
+  function setupObserver() {
+    var container = document.querySelector('yt-live-chat-item-list-renderer #items, #chat-messages #items, #items');
+    if (!container) return false;
 
-      if (!userEl || !msgEl) return;
-
-      var userName = userEl.textContent.trim();
-      var message = msgEl.textContent.trim();
-      if (!userName || !message) return;
-
-      var id = '${chatId}_yt_' + userName + '_' + message.substring(0, 30);
-      if (lastSent.has(id)) return;
-      lastSent.add(id);
-      firstSeen[id] = Date.now();
-
-      var avatarEl = el.querySelector('#img');
-      var avatar = avatarEl ? avatarEl.src : null;
-
-      messages.push({
-        messageId: id,
-        platform: 'youtube',
-        chatId: '${chatId}',
-        chatName: '${chatName}',
-        userName: userName,
-        userAvatar: avatar,
-        message: message,
-        timestamp: firstSeen[id]
+    var observer = new MutationObserver(function(mutations) {
+      var msgs = [];
+      mutations.forEach(function(mutation) {
+        mutation.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          msgs.push(processElement(node));
+        });
       });
+      sendMessages(msgs);
     });
-
-    if (messages.length > 0) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: messages }));
-    }
-
-    if (lastSent.size > 1000) {
-      var arr = Array.from(lastSent);
-      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
-      lastSent = new Set(arr.slice(arr.length - 500));
-    }
+    observer.observe(container, { childList: true, subtree: false });
+    return true;
   }
 
-  function debouncedScrape() {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(scrapeMessages, 300);
+  initialScan();
+  if (!setupObserver()) {
+    var retries = 0;
+    var interval = setInterval(function() {
+      if (setupObserver() || ++retries > 10) clearInterval(interval);
+    }, 1000);
   }
-
-  var chatContainer = document.querySelector('#chat-messages, #items, yt-live-chat-item-list-renderer #items');
-  if (chatContainer) {
-    var observer = new MutationObserver(debouncedScrape);
-    observer.observe(chatContainer, { childList: true, subtree: false });
-  }
-
-  setInterval(scrapeMessages, 3000);
-  scrapeMessages();
 })();
 true;
 `;
@@ -177,99 +171,90 @@ true;
 export function getKickScraper(chatId: string, chatName: string): string {
   return `
 (function() {
-  if (window.__streamchat_observer) return true;
-  window.__streamchat_observer = true;
+  if (window.__streamchat_init) return true;
+  window.__streamchat_init = true;
 
-  var lastSent = new Set();
-  var firstSeen = {};
-  var debounceTimer = null;
+  var sent = new Set();
 
-  function scrapeMessages() {
+  function processElement(el) {
+    var userEl = el.querySelector
+      ? el.querySelector('[class*="chat-entry-username"], .chat-entry-username, [class*="username"]')
+      : null;
+    var msgEl = el.querySelector
+      ? el.querySelector('[class*="chat-entry-content"], .chat-entry-content, [class*="message-content"]')
+      : null;
+
+    var userName, message;
+
+    if (userEl && msgEl) {
+      userName = userEl.textContent.trim();
+      message = msgEl.textContent.trim();
+    } else {
+      var allText = el.textContent ? el.textContent.trim() : '';
+      if (allText.length < 3 || !allText.includes(':')) return null;
+      var parts = allText.split(':');
+      userName = parts[0].trim();
+      message = parts.slice(1).join(':').trim();
+    }
+
+    if (!userName || !message) return null;
+
+    var id = '${chatId}_kk_' + userName + '_' + message.substring(0, 40);
+    if (sent.has(id)) return null;
+    sent.add(id);
+
+    return {
+      messageId: id,
+      platform: 'kick',
+      chatId: '${chatId}',
+      chatName: '${chatName}',
+      userName: userName,
+      userAvatar: null,
+      message: message,
+      timestamp: Date.now()
+    };
+  }
+
+  function sendMessages(msgs) {
+    var valid = msgs.filter(Boolean);
+    if (valid.length > 0) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: valid }));
+    }
+  }
+
+  function initialScan() {
     var items = document.querySelectorAll('[class*="chat-entry"], .chat-entry, [data-chat-entry]');
-    if (!items.length) {
-      items = document.querySelectorAll('.message-container, [class*="message"]');
-    }
+    if (!items.length) items = document.querySelectorAll('.message-container, [class*="message"]');
+    var msgs = [];
+    items.forEach(function(el) { msgs.push(processElement(el)); });
+    sendMessages(msgs);
+  }
 
-    var messages = [];
-    items.forEach(function(el) {
-      var userEl = el.querySelector('[class*="chat-entry-username"], .chat-entry-username, [class*="username"]');
-      var msgEl = el.querySelector('[class*="chat-entry-content"], .chat-entry-content, [class*="message-content"]');
+  function setupObserver() {
+    var container = document.querySelector('[id*="chatroom"], .chatroom, [class*="chat-list"]');
+    if (!container) return false;
 
-      if (!userEl || !msgEl) {
-        var allText = el.textContent || '';
-        if (allText.length > 2 && allText.includes(':')) {
-          var parts = allText.split(':');
-          var user = parts[0].trim();
-          var msg = parts.slice(1).join(':').trim();
-          if (user && msg) {
-            var id = '${chatId}_kk_' + user + '_' + msg.substring(0, 30);
-            if (!lastSent.has(id)) {
-              lastSent.add(id);
-              firstSeen[id] = Date.now();
-              messages.push({
-                messageId: id,
-                platform: 'kick',
-                chatId: '${chatId}',
-                chatName: '${chatName}',
-                userName: user,
-                userAvatar: null,
-                message: msg,
-                timestamp: firstSeen[id]
-              });
-            }
-          }
-        }
-        return;
-      }
-
-      var userName = userEl.textContent.trim();
-      var message = msgEl.textContent.trim();
-      if (!userName || !message) return;
-
-      var id = '${chatId}_kk_' + userName + '_' + message.substring(0, 30);
-      if (lastSent.has(id)) return;
-      lastSent.add(id);
-      firstSeen[id] = Date.now();
-
-      var avatarEl = el.querySelector('img');
-      var avatar = avatarEl ? avatarEl.src : null;
-
-      messages.push({
-        messageId: id,
-        platform: 'kick',
-        chatId: '${chatId}',
-        chatName: '${chatName}',
-        userName: userName,
-        userAvatar: avatar,
-        message: message,
-        timestamp: firstSeen[id]
+    var observer = new MutationObserver(function(mutations) {
+      var msgs = [];
+      mutations.forEach(function(mutation) {
+        mutation.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          msgs.push(processElement(node));
+        });
       });
+      sendMessages(msgs);
     });
-
-    if (messages.length > 0) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: messages }));
-    }
-
-    if (lastSent.size > 1000) {
-      var arr = Array.from(lastSent);
-      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
-      lastSent = new Set(arr.slice(arr.length - 500));
-    }
+    observer.observe(container, { childList: true, subtree: false });
+    return true;
   }
 
-  function debouncedScrape() {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(scrapeMessages, 300);
+  initialScan();
+  if (!setupObserver()) {
+    var retries = 0;
+    var interval = setInterval(function() {
+      if (setupObserver() || ++retries > 10) clearInterval(interval);
+    }, 1000);
   }
-
-  var chatContainer = document.querySelector('[id*="chatroom"], .chatroom, [class*="chat-list"]');
-  if (chatContainer) {
-    var observer = new MutationObserver(debouncedScrape);
-    observer.observe(chatContainer, { childList: true, subtree: false });
-  }
-
-  setInterval(scrapeMessages, 3000);
-  scrapeMessages();
 })();
 true;
 `;
@@ -278,69 +263,72 @@ true;
 export function getGenericScraper(chatId: string, chatName: string, platform: string): string {
   return `
 (function() {
-  if (window.__streamchat_observer) return true;
-  window.__streamchat_observer = true;
+  if (window.__streamchat_init) return true;
+  window.__streamchat_init = true;
 
-  var lastSent = new Set();
-  var firstSeen = {};
-  var debounceTimer = null;
+  var sent = new Set();
 
-  function scrapeMessages() {
+  function processElement(el) {
+    if (!el.querySelector) return null;
+    if (el.children && el.children.length > 10) return null;
+    var text = el.textContent ? el.textContent.trim() : '';
+    if (text.length < 3 || text.length > 500) return null;
+
+    var id = '${chatId}_gen_' + text.substring(0, 50);
+    if (sent.has(id)) return null;
+    sent.add(id);
+
+    var parts = text.split(':');
+    var userName = parts.length >= 2 ? parts[0].trim().substring(0, 30) : 'User';
+    var message = parts.length >= 2 ? parts.slice(1).join(':').trim() : text;
+    if (!message) return null;
+
+    return {
+      messageId: id,
+      platform: '${platform}',
+      chatId: '${chatId}',
+      chatName: '${chatName}',
+      userName: userName,
+      userAvatar: null,
+      message: message,
+      timestamp: Date.now()
+    };
+  }
+
+  function sendMessages(msgs) {
+    var valid = msgs.filter(Boolean);
+    if (valid.length > 0) {
+      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: valid }));
+    }
+  }
+
+  function initialScan() {
     var candidates = document.querySelectorAll('[class*="message"], [class*="chat"], [class*="comment"]');
-    var messages = [];
+    var msgs = [];
+    candidates.forEach(function(el) { msgs.push(processElement(el)); });
+    sendMessages(msgs);
+  }
 
-    candidates.forEach(function(el) {
-      if (el.children.length > 10) return;
-      var text = el.textContent.trim();
-      if (text.length < 3 || text.length > 500) return;
+  function setupObserver() {
+    var body = document.body;
+    if (!body) return false;
 
-      var id = '${chatId}_gen_' + text.substring(0, 50);
-      if (lastSent.has(id)) return;
-      lastSent.add(id);
-      firstSeen[id] = Date.now();
-
-      var parts = text.split(':');
-      var userName = parts.length >= 2 ? parts[0].trim() : 'User';
-      var message = parts.length >= 2 ? parts.slice(1).join(':').trim() : text;
-
-      if (!message) return;
-
-      messages.push({
-        messageId: id,
-        platform: '${platform}',
-        chatId: '${chatId}',
-        chatName: '${chatName}',
-        userName: userName.substring(0, 30),
-        userAvatar: null,
-        message: message,
-        timestamp: firstSeen[id]
+    var observer = new MutationObserver(function(mutations) {
+      var msgs = [];
+      mutations.forEach(function(mutation) {
+        mutation.addedNodes.forEach(function(node) {
+          if (node.nodeType !== 1) return;
+          msgs.push(processElement(node));
+        });
       });
+      sendMessages(msgs);
     });
-
-    if (messages.length > 0) {
-      window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: messages }));
-    }
-
-    if (lastSent.size > 1000) {
-      var arr = Array.from(lastSent);
-      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
-      lastSent = new Set(arr.slice(arr.length - 500));
-    }
+    observer.observe(body, { childList: true, subtree: true });
+    return true;
   }
 
-  function debouncedScrape() {
-    if (debounceTimer) clearTimeout(debounceTimer);
-    debounceTimer = setTimeout(scrapeMessages, 300);
-  }
-
-  var body = document.body;
-  if (body) {
-    var observer = new MutationObserver(debouncedScrape);
-    observer.observe(body, { childList: true, subtree: false });
-  }
-
-  setInterval(scrapeMessages, 4000);
-  setTimeout(scrapeMessages, 2000);
+  setTimeout(initialScan, 2000);
+  setupObserver();
 })();
 true;
 `;
