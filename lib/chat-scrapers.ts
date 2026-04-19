@@ -5,6 +5,8 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
   window.__streamchat_observer = true;
 
   var lastSent = new Set();
+  var firstSeen = {};
+  var debounceTimer = null;
 
   function scrapeMessages() {
     var items = document.querySelectorAll('[class*="chat-line__message"], .chat-line__message, [data-a-target="chat-line-message"]');
@@ -25,9 +27,10 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
             var user = parts[0].trim();
             var msg = parts.slice(1).join(':').trim();
             if (user && msg) {
-              var id = '${chatId}_tw_' + user + '_' + msg.substring(0, 30) + '_' + Date.now();
+              var id = '${chatId}_tw_' + user + '_' + msg.substring(0, 30);
               if (!lastSent.has(id)) {
                 lastSent.add(id);
+                firstSeen[id] = Date.now();
                 messages.push({
                   messageId: id,
                   platform: 'twitch',
@@ -36,7 +39,7 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
                   userName: user,
                   userAvatar: null,
                   message: msg,
-                  timestamp: Date.now()
+                  timestamp: firstSeen[id]
                 });
               }
             }
@@ -52,19 +55,20 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
       var id = '${chatId}_tw_' + userName + '_' + message.substring(0, 30);
       if (lastSent.has(id)) return;
       lastSent.add(id);
+      firstSeen[id] = Date.now();
 
       var avatarEl = el.querySelector('img[class*="chat-badge"], img');
       var avatar = avatarEl ? avatarEl.src : null;
 
       messages.push({
-        messageId: id + '_' + Date.now(),
+        messageId: id,
         platform: 'twitch',
         chatId: '${chatId}',
         chatName: '${chatName}',
         userName: userName,
         userAvatar: avatar,
         message: message,
-        timestamp: Date.now()
+        timestamp: firstSeen[id]
       });
     });
 
@@ -74,19 +78,23 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
 
     if (lastSent.size > 1000) {
       var arr = Array.from(lastSent);
+      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
       lastSent = new Set(arr.slice(arr.length - 500));
     }
   }
 
-  var chatContainer = document.querySelector('[class*="chat-scrollable-area"], .chat-scrollable-area__message-container, [role="log"]');
-  if (chatContainer) {
-    var observer = new MutationObserver(function() {
-      scrapeMessages();
-    });
-    observer.observe(chatContainer, { childList: true, subtree: true });
+  function debouncedScrape() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(scrapeMessages, 300);
   }
 
-  setInterval(scrapeMessages, 2000);
+  var chatContainer = document.querySelector('[class*="chat-scrollable-area"], .chat-scrollable-area__message-container, [role="log"]');
+  if (chatContainer) {
+    var observer = new MutationObserver(debouncedScrape);
+    observer.observe(chatContainer, { childList: true, subtree: false });
+  }
+
+  setInterval(scrapeMessages, 3000);
   scrapeMessages();
 })();
 true;
@@ -100,6 +108,8 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
   window.__streamchat_observer = true;
 
   var lastSent = new Set();
+  var firstSeen = {};
+  var debounceTimer = null;
 
   function scrapeMessages() {
     var items = document.querySelectorAll('yt-live-chat-text-message-renderer, yt-live-chat-paid-message-renderer');
@@ -118,19 +128,20 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
       var id = '${chatId}_yt_' + userName + '_' + message.substring(0, 30);
       if (lastSent.has(id)) return;
       lastSent.add(id);
+      firstSeen[id] = Date.now();
 
       var avatarEl = el.querySelector('#img');
       var avatar = avatarEl ? avatarEl.src : null;
 
       messages.push({
-        messageId: id + '_' + Date.now(),
+        messageId: id,
         platform: 'youtube',
         chatId: '${chatId}',
         chatName: '${chatName}',
         userName: userName,
         userAvatar: avatar,
         message: message,
-        timestamp: Date.now()
+        timestamp: firstSeen[id]
       });
     });
 
@@ -140,19 +151,23 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
 
     if (lastSent.size > 1000) {
       var arr = Array.from(lastSent);
+      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
       lastSent = new Set(arr.slice(arr.length - 500));
     }
   }
 
-  var chatContainer = document.querySelector('#chat-messages, #items, yt-live-chat-item-list-renderer #items');
-  if (chatContainer) {
-    var observer = new MutationObserver(function() {
-      scrapeMessages();
-    });
-    observer.observe(chatContainer, { childList: true, subtree: true });
+  function debouncedScrape() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(scrapeMessages, 300);
   }
 
-  setInterval(scrapeMessages, 2000);
+  var chatContainer = document.querySelector('#chat-messages, #items, yt-live-chat-item-list-renderer #items');
+  if (chatContainer) {
+    var observer = new MutationObserver(debouncedScrape);
+    observer.observe(chatContainer, { childList: true, subtree: false });
+  }
+
+  setInterval(scrapeMessages, 3000);
   scrapeMessages();
 })();
 true;
@@ -166,6 +181,8 @@ export function getKickScraper(chatId: string, chatName: string): string {
   window.__streamchat_observer = true;
 
   var lastSent = new Set();
+  var firstSeen = {};
+  var debounceTimer = null;
 
   function scrapeMessages() {
     var items = document.querySelectorAll('[class*="chat-entry"], .chat-entry, [data-chat-entry]');
@@ -188,15 +205,16 @@ export function getKickScraper(chatId: string, chatName: string): string {
             var id = '${chatId}_kk_' + user + '_' + msg.substring(0, 30);
             if (!lastSent.has(id)) {
               lastSent.add(id);
+              firstSeen[id] = Date.now();
               messages.push({
-                messageId: id + '_' + Date.now(),
+                messageId: id,
                 platform: 'kick',
                 chatId: '${chatId}',
                 chatName: '${chatName}',
                 userName: user,
                 userAvatar: null,
                 message: msg,
-                timestamp: Date.now()
+                timestamp: firstSeen[id]
               });
             }
           }
@@ -211,19 +229,20 @@ export function getKickScraper(chatId: string, chatName: string): string {
       var id = '${chatId}_kk_' + userName + '_' + message.substring(0, 30);
       if (lastSent.has(id)) return;
       lastSent.add(id);
+      firstSeen[id] = Date.now();
 
       var avatarEl = el.querySelector('img');
       var avatar = avatarEl ? avatarEl.src : null;
 
       messages.push({
-        messageId: id + '_' + Date.now(),
+        messageId: id,
         platform: 'kick',
         chatId: '${chatId}',
         chatName: '${chatName}',
         userName: userName,
         userAvatar: avatar,
         message: message,
-        timestamp: Date.now()
+        timestamp: firstSeen[id]
       });
     });
 
@@ -233,19 +252,23 @@ export function getKickScraper(chatId: string, chatName: string): string {
 
     if (lastSent.size > 1000) {
       var arr = Array.from(lastSent);
+      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
       lastSent = new Set(arr.slice(arr.length - 500));
     }
   }
 
-  var chatContainer = document.querySelector('[id*="chatroom"], .chatroom, [class*="chat-list"]');
-  if (chatContainer) {
-    var observer = new MutationObserver(function() {
-      scrapeMessages();
-    });
-    observer.observe(chatContainer, { childList: true, subtree: true });
+  function debouncedScrape() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(scrapeMessages, 300);
   }
 
-  setInterval(scrapeMessages, 2000);
+  var chatContainer = document.querySelector('[id*="chatroom"], .chatroom, [class*="chat-list"]');
+  if (chatContainer) {
+    var observer = new MutationObserver(debouncedScrape);
+    observer.observe(chatContainer, { childList: true, subtree: false });
+  }
+
+  setInterval(scrapeMessages, 3000);
   scrapeMessages();
 })();
 true;
@@ -259,7 +282,8 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
   window.__streamchat_observer = true;
 
   var lastSent = new Set();
-  var msgCount = 0;
+  var firstSeen = {};
+  var debounceTimer = null;
 
   function scrapeMessages() {
     var candidates = document.querySelectorAll('[class*="message"], [class*="chat"], [class*="comment"]');
@@ -273,6 +297,7 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
       var id = '${chatId}_gen_' + text.substring(0, 50);
       if (lastSent.has(id)) return;
       lastSent.add(id);
+      firstSeen[id] = Date.now();
 
       var parts = text.split(':');
       var userName = parts.length >= 2 ? parts[0].trim() : 'User';
@@ -281,14 +306,14 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
       if (!message) return;
 
       messages.push({
-        messageId: id + '_' + (++msgCount),
+        messageId: id,
         platform: '${platform}',
         chatId: '${chatId}',
         chatName: '${chatName}',
         userName: userName.substring(0, 30),
         userAvatar: null,
         message: message,
-        timestamp: Date.now()
+        timestamp: firstSeen[id]
       });
     });
 
@@ -298,19 +323,23 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
 
     if (lastSent.size > 1000) {
       var arr = Array.from(lastSent);
+      arr.slice(0, arr.length - 500).forEach(function(k) { delete firstSeen[k]; });
       lastSent = new Set(arr.slice(arr.length - 500));
     }
   }
 
-  var body = document.body;
-  if (body) {
-    var observer = new MutationObserver(function() {
-      scrapeMessages();
-    });
-    observer.observe(body, { childList: true, subtree: true });
+  function debouncedScrape() {
+    if (debounceTimer) clearTimeout(debounceTimer);
+    debounceTimer = setTimeout(scrapeMessages, 300);
   }
 
-  setInterval(scrapeMessages, 3000);
+  var body = document.body;
+  if (body) {
+    var observer = new MutationObserver(debouncedScrape);
+    observer.observe(body, { childList: true, subtree: false });
+  }
+
+  setInterval(scrapeMessages, 4000);
   setTimeout(scrapeMessages, 2000);
 })();
 true;

@@ -12,11 +12,14 @@ export interface UnifiedChatMessage {
 }
 
 const MAX_MESSAGES = 500;
+const NOTIFY_THROTTLE_MS = 150;
 
 export class MessageAggregator {
   private messages: UnifiedChatMessage[] = [];
   private seenIds: Set<string> = new Set();
   private listeners: Set<(messages: UnifiedChatMessage[]) => void> = new Set();
+  private notifyTimer: ReturnType<typeof setTimeout> | null = null;
+  private pendingNotify = false;
 
   addMessage(msg: UnifiedChatMessage): void {
     if (!msg.message || !msg.message.trim()) return;
@@ -32,7 +35,7 @@ export class MessageAggregator {
       removed.forEach((m) => this.seenIds.delete(m.messageId));
     }
 
-    this.notify();
+    this.scheduleNotify();
   }
 
   addMessages(msgs: UnifiedChatMessage[]): void {
@@ -53,7 +56,7 @@ export class MessageAggregator {
         removed.forEach((m) => this.seenIds.delete(m.messageId));
       }
 
-      this.notify();
+      this.scheduleNotify();
     }
   }
 
@@ -64,6 +67,10 @@ export class MessageAggregator {
   clear(): void {
     this.messages = [];
     this.seenIds.clear();
+    if (this.notifyTimer) {
+      clearTimeout(this.notifyTimer);
+      this.notifyTimer = null;
+    }
     this.notify();
   }
 
@@ -72,6 +79,14 @@ export class MessageAggregator {
     return () => {
       this.listeners.delete(listener);
     };
+  }
+
+  private scheduleNotify(): void {
+    if (this.notifyTimer) return;
+    this.notifyTimer = setTimeout(() => {
+      this.notifyTimer = null;
+      this.notify();
+    }, NOTIFY_THROTTLE_MS);
   }
 
   private notify(): void {
