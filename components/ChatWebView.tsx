@@ -4,6 +4,7 @@ import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
+import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 
 interface ChatWebViewProps {
@@ -31,6 +32,10 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
   `;
 
   if (Platform.OS === "web") {
+    const kickChannel = chat.platform === "kick"
+      ? (chat.url.match(/kick\.com\/(\w+)/)?.[1] ?? "")
+      : "";
+
     return (
       <View style={[styles.container, compact && styles.compact]}>
         {showHeader && (
@@ -41,11 +46,15 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
           </View>
         )}
         <View style={styles.webContainer}>
-          <iframe
-            src={embedUrl}
-            style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
-            allow="autoplay"
-          />
+          {chat.platform === "kick" && kickChannel ? (
+            <KickWebChat channel={kickChannel} fontSize={fontSize} />
+          ) : (
+            <iframe
+              src={embedUrl}
+              style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
+              allow="autoplay"
+            />
+          )}
         </View>
       </View>
     );
