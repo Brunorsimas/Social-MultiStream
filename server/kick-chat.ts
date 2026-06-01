@@ -1,24 +1,28 @@
 import { Request, Response } from "express";
 import WebSocket from "ws";
+import { execSync } from "child_process";
 
 const PUSHER_URL =
-  "wss://ws-us2.pusher.com/app/eb1d5f283081a78b932c?protocol=7&client=js&version=7.6.0&flash=false";
+  "wss://ws-us3.pusher.com/app/dd11c46dae0376080879?protocol=7&client=js&version=7.6.0&flash=false";
 
-async function getKickChatroomId(channel: string): Promise<number | null> {
+function getKickChatroomId(channel: string): number | null {
   try {
-    const res = await fetch(`https://kick.com/api/v2/channels/${channel}`, {
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
-        Accept: "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://kick.com/",
-      },
-    });
-    if (!res.ok) return null;
-    const data: any = await res.json();
-    return data?.chatroom?.id ?? null;
-  } catch {
+    const out = execSync(
+      `curl -s --max-time 8 ` +
+        `"https://kick.com/api/v1/channels/${encodeURIComponent(channel)}" ` +
+        `-H "User-Agent: Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36" ` +
+        `-H "Accept: application/json" ` +
+        `-H "Accept-Language: en-US,en;q=0.9" ` +
+        `-H "Referer: https://kick.com/" ` +
+        `-H "Origin: https://kick.com"`,
+      { timeout: 10000, encoding: "utf8" }
+    );
+    const data = JSON.parse(out);
+    const id = data?.chatroom?.id;
+    console.log(`[kick] Channel "${channel}" -> chatroomId: ${id}`);
+    return id ?? null;
+  } catch (e: any) {
+    console.error(`[kick] Failed to get chatroom id for "${channel}": ${e?.message}`);
     return null;
   }
 }
@@ -43,7 +47,7 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
     } catch {}
   };
 
-  const chatroomId = await getKickChatroomId(channel);
+  const chatroomId = getKickChatroomId(channel);
   if (!chatroomId) {
     send({ type: "error", message: `Canal "${channel}" não encontrado no Kick` });
     res.end();
@@ -51,10 +55,11 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   }
 
   send({ type: "connected", chatroomId });
+  console.log(`[kick] SSE connected for "${channel}" (chatroom ${chatroomId})`);
 
-  let ws: WebSocket;
-  let pingTimer: ReturnType<typeof setInterval> | null = null;
   let closed = false;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
+  let ws: WebSocket;
 
   const cleanup = () => {
     if (closed) return;
@@ -65,13 +70,15 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
 
   try {
     ws = new WebSocket(PUSHER_URL);
-  } catch {
+  } catch (e: any) {
+    console.error(`[kick] WebSocket init failed: ${e?.message}`);
     send({ type: "error", message: "Falha ao conectar ao WebSocket" });
     res.end();
     return;
   }
 
   ws.on("open", () => {
+    console.log(`[kick] Pusher connected, subscribing to chatrooms.${chatroomId}.v2`);
     ws.send(
       JSON.stringify({
         event: "pusher:subscribe",
@@ -102,21 +109,29 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
             ? new Date(d.created_at).getTime()
             : Date.now(),
         });
+      } else if (msg.event === "pusher_internal:subscription_succeeded") {
+        console.log(`[kick] Subscribed to chatrooms.${chatroomId}.v2`);
+        send({ type: "subscribed", chatroomId });
+      } else if (msg.event === "pusher:error") {
+        console.error(`[kick] Pusher error: ${JSON.stringify(msg.data)}`);
       }
     } catch {}
   });
 
-  ws.on("error", () => {
+  ws.on("error", (e) => {
+    console.error(`[kick] WebSocket error: ${e.message}`);
     send({ type: "error", message: "Erro no WebSocket do Kick" });
   });
 
-  ws.on("close", () => {
+  ws.on("close", (code) => {
+    console.log(`[kick] WebSocket closed: ${code}`);
     if (!closed) send({ type: "disconnected" });
     cleanup();
     try { res.end(); } catch {}
   });
 
   req.on("close", () => {
+    console.log(`[kick] Client disconnected from SSE for "${channel}"`);
     cleanup();
   });
 }
