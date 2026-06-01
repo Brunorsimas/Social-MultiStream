@@ -78,6 +78,8 @@
   "private": true,
   "overrides": {
     "brace-expansion": "^1.1.13",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "uuid": "^9.0.0",
+    "postcss": "^8.4.52"
   }
 }
