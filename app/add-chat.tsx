@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
   },
   platformText: {
     fontSize: 13,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
     color: Colors.dark.textSecondary,
   },
   platformTextSelected: {

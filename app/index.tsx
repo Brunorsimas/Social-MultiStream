@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 32,
-    fontFamily: "Inter_700Bold",
+    fontFamily: "Inter_600SemiBold",
     color: Colors.dark.text,
     marginBottom: 6,
   },
@@ -154,7 +154,7 @@ const styles = StyleSheet.create({
   },
   statNumber: {
     fontSize: 24,
-    fontFamily: "Inter_700Bold",
+    fontFamily: "Inter_600SemiBold",
     color: Colors.dark.text,
   },
   statLabel: {
@@ -187,7 +187,7 @@ const styles = StyleSheet.create({
   },
   primaryBtnText: {
     fontSize: 16,
-    fontFamily: "Inter_700Bold",
+    fontFamily: "Inter_600SemiBold",
     color: "#000",
   },
   actionsGrid: {

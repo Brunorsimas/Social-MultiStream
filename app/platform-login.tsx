@@ -137,7 +137,7 @@ const styles = StyleSheet.create({
   },
   skipText: {
     fontSize: 15,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
     color: Colors.dark.textSecondary,
   },
   infoBar: {

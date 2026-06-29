@@ -319,7 +319,7 @@ const styles = StyleSheet.create({
   },
   avatarText: {
     fontSize: 16,
-    fontFamily: "Inter_700Bold",
+    fontFamily: "Inter_600SemiBold",
   },
   messageBody: {
     flex: 1,
@@ -338,7 +338,7 @@ const styles = StyleSheet.create({
   },
   platformPillText: {
     fontSize: 9,
-    fontFamily: "Inter_700Bold",
+    fontFamily: "Inter_600SemiBold",
     color: "#fff",
     letterSpacing: 0.5,
   },

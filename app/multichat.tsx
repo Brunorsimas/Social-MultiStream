@@ -283,7 +283,7 @@ const styles = StyleSheet.create({
   unifiedToggleText: {
     flex: 1,
     fontSize: 13,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
     color: Colors.dark.textMuted,
   },
   unifiedToggleTextActive: {

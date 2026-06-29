@@ -178,7 +178,7 @@ const styles = StyleSheet.create({
   },
   tabText: {
     fontSize: 12,
-    fontFamily: "Inter_500Medium",
+    fontFamily: "Inter_400Regular",
     color: Colors.dark.textMuted,
     maxWidth: 100,
   },
