@@ -1,23 +1,23 @@
 import React from "react";
 import { View, StyleSheet } from "react-native";
 import { Ionicons, MaterialCommunityIcons, FontAwesome5 } from "@expo/vector-icons";
-import Colors from "@/constants/colors";
+import { useChats } from "@/lib/chat-context";
 
 interface PlatformBadgeProps {
   platform: string;
   size?: number;
 }
 
-const platformConfig: Record<string, { icon: string; family: string; color: string }> = {
-  twitch: { icon: "twitch", family: "fontawesome5", color: Colors.dark.twitch },
-  youtube: { icon: "youtube", family: "fontawesome5", color: Colors.dark.youtube },
-  kick: { icon: "lightning-bolt", family: "material", color: Colors.dark.kick },
-  facebook: { icon: "facebook", family: "fontawesome5", color: Colors.dark.facebook },
-  tiktok: { icon: "musical-notes", family: "ionicons", color: Colors.dark.tiktok },
-  other: { icon: "chatbubbles", family: "ionicons", color: Colors.dark.primary },
-};
-
 export default function PlatformBadge({ platform, size = 16 }: PlatformBadgeProps) {
+  const { themeColors } = useChats();
+  const platformConfig: Record<string, { icon: string; family: string; color: string }> = {
+    twitch: { icon: "twitch", family: "fontawesome5", color: themeColors.twitch },
+    youtube: { icon: "youtube", family: "fontawesome5", color: themeColors.youtube },
+    kick: { icon: "lightning-bolt", family: "material", color: themeColors.kick },
+    facebook: { icon: "facebook", family: "fontawesome5", color: themeColors.facebook },
+    tiktok: { icon: "musical-notes", family: "ionicons", color: themeColors.tiktok },
+    other: { icon: "chatbubbles", family: "ionicons", color: themeColors.primary },
+  };
   const config = platformConfig[platform] || platformConfig.other;
 
   const renderIcon = () => {

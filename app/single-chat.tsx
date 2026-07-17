@@ -1,10 +1,10 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet, Platform, ActivityIndicator, Alert } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { useKeepAwake } from "expo-keep-awake";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import ChatWebView from "@/components/ChatWebView";
 import { useChats } from "@/lib/chat-context";
 
@@ -15,7 +15,8 @@ function KeepAwakeGuard() {
 
 export default function SingleChatScreen() {
   const insets = useSafeAreaInsets();
-  const { chats, togglePin, settings, isLoading } = useChats();
+  const { chats, togglePin, settings, isLoading, themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const { id } = useLocalSearchParams<{ id: string }>();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -25,7 +26,7 @@ export default function SingleChatScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.errorState}>
-          <ActivityIndicator color={Colors.dark.primary} />
+          <ActivityIndicator color={themeColors.primary} />
           <Text style={styles.errorText}>Loading chat...</Text>
         </View>
       </View>
@@ -37,13 +38,13 @@ export default function SingleChatScreen() {
       <View style={styles.container}>
         <View style={[styles.header, { paddingTop: insets.top + webTopInset + 12 }]}>
           <Pressable onPress={() => router.back()} hitSlop={12}>
-            <Ionicons name="chevron-back" size={24} color={Colors.dark.text} />
+            <Ionicons name="chevron-back" size={24} color={themeColors.text} />
           </Pressable>
           <Text style={styles.headerTitle}>Chat Not Found</Text>
           <View style={{ width: 24 }} />
         </View>
         <View style={styles.errorState}>
-          <Ionicons name="alert-circle-outline" size={48} color={Colors.dark.textMuted} />
+          <Ionicons name="alert-circle-outline" size={48} color={themeColors.textMuted} />
           <Text style={styles.errorText}>This chat could not be found</Text>
         </View>
       </View>
@@ -55,7 +56,7 @@ export default function SingleChatScreen() {
       {settings.keepScreenOn && <KeepAwakeGuard />}
       <View style={[styles.header, { paddingTop: insets.top + webTopInset + 12 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="chevron-back" size={24} color={Colors.dark.text} />
+          <Ionicons name="chevron-back" size={24} color={themeColors.text} />
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{chat.name}</Text>
         <Pressable
@@ -69,7 +70,7 @@ export default function SingleChatScreen() {
           <Ionicons
             name={chat.pinned ? "pin" : "pin-outline"}
             size={22}
-            color={chat.pinned ? Colors.dark.warning : Colors.dark.textMuted}
+            color={chat.pinned ? themeColors.warning : themeColors.textMuted}
           />
         </Pressable>
       </View>
@@ -80,10 +81,10 @@ export default function SingleChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: "row",
@@ -92,14 +93,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   headerTitle: {
     flex: 1,
     textAlign: "center",
     fontSize: 17,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
     marginHorizontal: 12,
   },
   chatContainer: {
@@ -114,6 +115,6 @@ const styles = StyleSheet.create({
   errorText: {
     fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
   },
 });

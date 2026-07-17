@@ -1,8 +1,12 @@
 import { Link, Stack } from "expo-router";
 import { StyleSheet, Text, View } from "react-native";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
+import { useChats } from "@/lib/chat-context";
+import { useMemo } from "react";
 
 export default function NotFoundScreen() {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   return (
     <>
       <Stack.Screen options={{ title: "Not Found" }} />
@@ -16,18 +20,18 @@ export default function NotFoundScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     padding: 20,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
   },
   title: {
     fontSize: 20,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
   },
   link: {
     marginTop: 15,
@@ -35,7 +39,7 @@ const styles = StyleSheet.create({
   },
   linkText: {
     fontSize: 14,
-    color: Colors.dark.primary,
+    color: colors.primary,
     fontFamily: "Inter_400Regular",
   },
 });

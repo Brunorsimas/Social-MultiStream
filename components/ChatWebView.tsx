@@ -1,12 +1,13 @@
-import React, { useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getCurrentEmbedDomain, getKickChannelName } from "@/lib/chat-url";
+import { useChats } from "@/lib/chat-context";
 
 interface ChatWebViewProps {
   chat: ChatConfig;
@@ -21,13 +22,30 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [webReloadKey, setWebReloadKey] = useState(0);
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
 
   const embedUrl = getChatEmbedUrl(chat.url, Platform.OS === "web" ? getCurrentEmbedDomain() : undefined);
+  const [sourceUrl, setSourceUrl] = useState(embedUrl);
+
+  useEffect(() => {
+    setSourceUrl(embedUrl);
+    setLoading(true);
+    setError(false);
+  }, [embedUrl]);
+
+  const handleNavigationChange = ({ url }: { url: string }) => {
+    if (chat.platform !== "youtube") return;
+    const resolvedUrl = getChatEmbedUrl(url);
+    if (resolvedUrl.includes("/live_chat?") && resolvedUrl !== sourceUrl) {
+      setSourceUrl(resolvedUrl);
+    }
+  };
 
   const injectedCSS = `
     (function() {
       var style = document.createElement('style');
-      style.textContent = 'body { font-size: ${fontSize}px !important; background: #0A0A0F !important; } * { font-size: inherit; }';
+      style.textContent = 'body { font-size: ${fontSize}px !important; background: ${themeColors.background} !important; color: ${themeColors.text} !important; } * { font-size: inherit; }';
       document.head.appendChild(style);
     })();
     true;
@@ -44,13 +62,13 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
             <Text style={styles.headerText} numberOfLines={1}>{chat.name}</Text>
             {onPin ? (
               <Pressable onPress={onPin} hitSlop={8}>
-                <Ionicons name={chat.pinned ? "pin" : "pin-outline"} size={14} color={chat.pinned ? Colors.dark.warning : Colors.dark.textMuted} />
+                <Ionicons name={chat.pinned ? "pin" : "pin-outline"} size={14} color={chat.pinned ? themeColors.warning : themeColors.textMuted} />
               </Pressable>
             ) : chat.pinned ? (
-              <Ionicons name="pin" size={12} color={Colors.dark.warning} />
+              <Ionicons name="pin" size={12} color={themeColors.warning} />
             ) : null}
             <Pressable onPress={() => setWebReloadKey((key) => key + 1)} hitSlop={8}>
-              <Ionicons name="refresh" size={14} color={Colors.dark.textMuted} />
+              <Ionicons name="refresh" size={14} color={themeColors.textMuted} />
             </Pressable>
           </View>
         )}
@@ -61,7 +79,7 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
               <iframe
                 key={webReloadKey}
               src={embedUrl}
-              style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
+              style={{ width: "100%", height: "100%", border: "none", backgroundColor: themeColors.background } as any}
               allow="autoplay"
             />
           )}
@@ -78,26 +96,26 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
           <Text style={styles.headerText} numberOfLines={1}>{chat.name}</Text>
           {onPin ? (
             <Pressable onPress={onPin} hitSlop={8}>
-              <Ionicons name={chat.pinned ? "pin" : "pin-outline"} size={14} color={chat.pinned ? Colors.dark.warning : Colors.dark.textMuted} />
+              <Ionicons name={chat.pinned ? "pin" : "pin-outline"} size={14} color={chat.pinned ? themeColors.warning : themeColors.textMuted} />
             </Pressable>
           ) : chat.pinned ? (
-            <Ionicons name="pin" size={12} color={Colors.dark.warning} />
+            <Ionicons name="pin" size={12} color={themeColors.warning} />
           ) : null}
           <Pressable onPress={() => webViewRef.current?.reload()} hitSlop={8}>
-            <Ionicons name="refresh" size={14} color={Colors.dark.textMuted} />
+            <Ionicons name="refresh" size={14} color={themeColors.textMuted} />
           </Pressable>
         </View>
       )}
       <View style={styles.webContainer}>
         {loading && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="small" color={Colors.dark.primary} />
+            <ActivityIndicator size="small" color={themeColors.primary} />
             <Text style={styles.loadingText}>Loading chat...</Text>
           </View>
         )}
         {error ? (
           <View style={styles.errorContainer}>
-            <Ionicons name="cloud-offline" size={32} color={Colors.dark.textMuted} />
+            <Ionicons name="cloud-offline" size={32} color={themeColors.textMuted} />
             <Text style={styles.errorText}>Unable to load chat</Text>
             <Pressable
               onPress={() => {
@@ -107,19 +125,20 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
               }}
               style={styles.retryBtn}
             >
-              <Ionicons name="refresh" size={16} color={Colors.dark.primary} />
+              <Ionicons name="refresh" size={16} color={themeColors.primary} />
             </Pressable>
           </View>
         ) : (
           <WebView
             ref={webViewRef}
-            source={{ uri: embedUrl }}
+            source={{ uri: sourceUrl }}
             style={styles.webview}
             onLoadEnd={() => setLoading(false)}
             onError={() => {
               setError(true);
               setLoading(false);
             }}
+            onNavigationStateChange={handleNavigationChange}
             injectedJavaScript={injectedCSS}
             javaScriptEnabled
             domStorageEnabled
@@ -135,14 +154,14 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   compact: {
     borderRadius: 8,
@@ -153,19 +172,19 @@ const styles = StyleSheet.create({
     gap: 6,
     paddingHorizontal: 10,
     paddingVertical: 8,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   headerText: {
     flex: 1,
-    color: Colors.dark.text,
+    color: colors.text,
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
   },
   webContainer: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
   },
   webview: {
     flex: 1,
@@ -175,12 +194,12 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
     gap: 8,
     zIndex: 10,
   },
   loadingText: {
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
@@ -192,7 +211,7 @@ const styles = StyleSheet.create({
     padding: 20,
   },
   errorText: {
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     fontSize: 13,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
@@ -201,7 +220,7 @@ const styles = StyleSheet.create({
     width: 40,
     height: 40,
     borderRadius: 20,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     alignItems: "center",
     justifyContent: "center",
     marginTop: 4,

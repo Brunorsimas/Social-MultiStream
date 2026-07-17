@@ -1,12 +1,13 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, Platform, ActivityIndicator } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import { WebView } from "react-native-webview";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "@/components/PlatformBadge";
+import { useChats } from "@/lib/chat-context";
 
 const PLATFORM_LOGIN_URLS: Record<string, { url: string; label: string }> = {
   twitch: { url: "https://www.twitch.tv/login", label: "Twitch" },
@@ -18,6 +19,8 @@ const PLATFORM_LOGIN_URLS: Record<string, { url: string; label: string }> = {
 };
 
 export default function PlatformLoginScreen() {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const insets = useSafeAreaInsets();
   const { platform, chatUrl } = useLocalSearchParams<{ platform: string; chatUrl?: string }>();
   const webViewRef = useRef<WebView>(null);
@@ -44,7 +47,7 @@ export default function PlatformLoginScreen() {
           <View style={{ width: 24 }} />
           <Text style={styles.headerTitle}>Platform Login</Text>
           <Pressable onPress={handleSkip} hitSlop={12}>
-            <Ionicons name="close" size={24} color={Colors.dark.textSecondary} />
+            <Ionicons name="close" size={24} color={themeColors.textSecondary} />
           </Pressable>
         </View>
         <View style={styles.webFallback}>
@@ -72,12 +75,12 @@ export default function PlatformLoginScreen() {
           <Text style={styles.headerTitle}>Login to {platformInfo.label}</Text>
         </View>
         <Pressable onPress={handleDone} hitSlop={12}>
-          <Ionicons name="checkmark" size={26} color={Colors.dark.success} />
+          <Ionicons name="checkmark" size={26} color={themeColors.success} />
         </Pressable>
       </View>
 
       <View style={styles.infoBar}>
-        <Ionicons name="lock-closed" size={13} color={Colors.dark.textMuted} />
+        <Ionicons name="lock-closed" size={13} color={themeColors.textMuted} />
         <Text style={styles.infoText}>
           Sign in so your chat loads correctly. Your credentials are stored only in the browser.
         </Text>
@@ -86,7 +89,7 @@ export default function PlatformLoginScreen() {
       <View style={styles.webContainer}>
         {loading && (
           <View style={styles.loadingOverlay}>
-            <ActivityIndicator size="large" color={Colors.dark.primary} />
+            <ActivityIndicator size="large" color={themeColors.primary} />
             <Text style={styles.loadingText}>Loading {platformInfo.label}...</Text>
           </View>
         )}
@@ -109,10 +112,10 @@ export default function PlatformLoginScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: "row",
@@ -121,7 +124,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   headerCenter: {
     flexDirection: "row",
@@ -131,12 +134,12 @@ const styles = StyleSheet.create({
   headerTitle: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
   },
   skipText: {
     fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textSecondary,
+    color: colors.textSecondary,
   },
   infoBar: {
     flexDirection: "row",
@@ -144,15 +147,15 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 10,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   infoText: {
     flex: 1,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     lineHeight: 16,
   },
   webContainer: {
@@ -166,14 +169,14 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
     gap: 12,
     zIndex: 10,
   },
   loadingText: {
     fontSize: 14,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
   },
   webFallback: {
     flex: 1,
@@ -185,18 +188,18 @@ const styles = StyleSheet.create({
   fallbackTitle: {
     fontSize: 20,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
     marginTop: 4,
   },
   fallbackDesc: {
     fontSize: 14,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     textAlign: "center",
     lineHeight: 20,
   },
   skipBtn: {
-    backgroundColor: Colors.dark.primary,
+    backgroundColor: colors.primary,
     paddingVertical: 12,
     paddingHorizontal: 28,
     borderRadius: 12,
@@ -205,6 +208,6 @@ const styles = StyleSheet.create({
   skipBtnText: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.background,
+    color: colors.background,
   },
 });

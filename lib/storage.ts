@@ -19,6 +19,7 @@ export interface AppSettings {
   streamerMode: boolean;
   keepScreenOn: boolean;
   unifiedMode: boolean;
+  theme: "dark" | "light";
 }
 
 const CHATS_KEY = "@streamchat_chats";
@@ -30,6 +31,7 @@ export const defaultSettings: AppSettings = {
   streamerMode: false,
   keepScreenOn: true,
   unifiedMode: false,
+  theme: "dark",
 };
 
 function generateId(): string {
@@ -46,7 +48,8 @@ function sanitizeChats(value: unknown): ChatConfig[] {
   const seenIds = new Set<string>();
   return value.flatMap((candidate, index) => {
     if (!isRecord(candidate)) return [];
-    const normalizedUrl = normalizeChatUrl(typeof candidate.url === "string" ? candidate.url : "");
+    const platformHint = typeof candidate.platform === "string" ? candidate.platform.toLowerCase() : undefined;
+    const normalizedUrl = normalizeChatUrl(typeof candidate.url === "string" ? candidate.url : "", platformHint);
     if (!normalizedUrl) return [];
 
     const id = typeof candidate.id === "string" && candidate.id.trim() ? candidate.id : generateId();
@@ -90,6 +93,7 @@ function sanitizeSettings(value: unknown): AppSettings {
     streamerMode: typeof value.streamerMode === "boolean" ? value.streamerMode : defaultSettings.streamerMode,
     keepScreenOn: typeof value.keepScreenOn === "boolean" ? value.keepScreenOn : defaultSettings.keepScreenOn,
     unifiedMode: typeof value.unifiedMode === "boolean" ? value.unifiedMode : defaultSettings.unifiedMode,
+    theme: value.theme === "light" ? "light" : "dark",
   };
 }
 
@@ -97,7 +101,7 @@ export function createChatConfig(
   chat: Omit<ChatConfig, "id" | "order">,
   order: number,
 ): ChatConfig {
-  const normalizedUrl = normalizeChatUrl(chat.url);
+  const normalizedUrl = normalizeChatUrl(chat.url, chat.platform);
   if (!normalizedUrl) throw new Error("Invalid chat URL");
   return {
     ...chat,

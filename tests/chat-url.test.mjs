@@ -4,7 +4,7 @@ import { detectPlatform, getChatEmbedUrl, getKickChannelName, isResolvableChatUr
 import { getTwitchScraper } from "../lib/chat-scrapers.ts";
 
 test("normalizes safe URLs and rejects active or credentialed URLs", () => {
-  assert.equal(normalizeChatUrl("twitch.tv/example"), "https://twitch.tv/example");
+  assert.equal(normalizeChatUrl("twitch.tv/example"), "https://www.twitch.tv/example/chat");
   assert.equal(normalizeChatUrl("javascript:alert(1)"), null);
   assert.equal(normalizeChatUrl("https://user:secret@example.com/chat"), null);
 });
@@ -32,9 +32,21 @@ test("extracts only valid Kick channel names", () => {
 });
 
 test("rejects known platform pages that cannot identify a chat", () => {
-  assert.equal(isResolvableChatUrl("https://youtube.com/@creator", "youtube"), false);
+  assert.equal(isResolvableChatUrl("https://youtube.com/@creator", "youtube"), true);
   assert.equal(isResolvableChatUrl("https://youtube.com/live/video-id", "youtube"), true);
   assert.equal(isResolvableChatUrl("https://example.com/chat", "twitch"), false);
+});
+
+test("normalizes chat paths and @handles using the selected platform", () => {
+  assert.equal(normalizeChatUrl("@gaules", "twitch"), "https://www.twitch.tv/gaules/chat");
+  assert.equal(normalizeChatUrl("@gaules", "kick"), "https://kick.com/gaules/chatroom");
+  assert.equal(normalizeChatUrl("@creator", "youtube"), "https://www.youtube.com/@creator/live");
+  assert.equal(normalizeChatUrl("kick.com/@gaules/chat"), "https://kick.com/gaules/chatroom");
+  assert.equal(normalizeChatUrl("twitch.tv/@gaules/chat"), "https://www.twitch.tv/gaules/chat");
+  assert.equal(
+    normalizeChatUrl("youtube.com/chat?v=video-id"),
+    "https://www.youtube.com/live_chat?v=video-id",
+  );
 });
 
 test("serializes user-provided chat metadata safely in scraper scripts", () => {

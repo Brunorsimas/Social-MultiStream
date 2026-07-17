@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useMemo } from "react";
 import {
   View,
   Text,
@@ -14,7 +14,7 @@ import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "@/components/PlatformBadge";
 import { useChats } from "@/lib/chat-context";
 import { detectPlatform, normalizeChatUrl } from "@/lib/storage";
@@ -24,7 +24,8 @@ const PLATFORMS = ["twitch", "youtube", "kick", "facebook", "tiktok", "other"];
 
 export default function AddChatScreen() {
   const insets = useSafeAreaInsets();
-  const { addChat, updateChat, chats, isLoading } = useChats();
+  const { addChat, updateChat, chats, isLoading, themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const params = useLocalSearchParams<{ editId?: string }>();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -68,17 +69,18 @@ export default function AddChatScreen() {
       Alert.alert("Missing Name", "Please enter a name for this chat.");
       return;
     }
-    const normalizedUrl = normalizeChatUrl(url);
+    const platformHint = platform && platform !== "other" ? platform : undefined;
+    const normalizedUrl = normalizeChatUrl(url, platformHint);
     if (!normalizedUrl) {
       Alert.alert("Invalid URL", "Enter a valid HTTP or HTTPS chat URL.");
       return;
     }
 
-    const finalPlatform = platform || detectPlatform(normalizedUrl);
+    const finalPlatform = platformHint || detectPlatform(normalizedUrl);
     if (!isResolvableChatUrl(normalizedUrl, finalPlatform)) {
       Alert.alert(
         "Unsupported Chat URL",
-        "Use a channel URL for Twitch or Kick, or a YouTube live/watch URL containing the video ID.",
+        "Use @usuario or a channel/chat URL for Twitch, Kick, or YouTube. YouTube watch/live links are also accepted.",
       );
       return;
     }
@@ -112,7 +114,7 @@ export default function AddChatScreen() {
     return (
       <View style={styles.container}>
         <View style={styles.loadingState}>
-          <ActivityIndicator color={Colors.dark.primary} />
+          <ActivityIndicator color={themeColors.primary} />
           <Text style={styles.helpText}>Loading chat...</Text>
         </View>
       </View>
@@ -123,14 +125,14 @@ export default function AddChatScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + webTopInset + 12 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="chevron-back" size={24} color={Colors.dark.text} />
+          <Ionicons name="chevron-back" size={24} color={themeColors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{editingChat ? "Edit Chat" : "Add Chat"}</Text>
         <Pressable onPress={handleSave} hitSlop={12} disabled={saving}>
           {saving ? (
-            <ActivityIndicator size="small" color={Colors.dark.primary} />
+            <ActivityIndicator size="small" color={themeColors.primary} />
           ) : (
-            <Ionicons name="checkmark" size={26} color={Colors.dark.primary} />
+            <Ionicons name="checkmark" size={26} color={themeColors.primary} />
           )}
         </Pressable>
       </View>
@@ -147,7 +149,7 @@ export default function AddChatScreen() {
             value={name}
             onChangeText={setName}
             placeholder="e.g. My Twitch Chat"
-            placeholderTextColor={Colors.dark.textMuted}
+            placeholderTextColor={themeColors.textMuted}
             autoCapitalize="words"
           />
         </View>
@@ -158,15 +160,15 @@ export default function AddChatScreen() {
             style={styles.input}
             value={url}
             onChangeText={setUrl}
-            placeholder="https://twitch.tv/channel"
-            placeholderTextColor={Colors.dark.textMuted}
+            placeholder="@usuario ou link do chat"
+            placeholderTextColor={themeColors.textMuted}
             autoCapitalize="none"
             autoCorrect={false}
             keyboardType="url"
           />
           {autoDetected && (
             <View style={styles.detectedRow}>
-              <Ionicons name="checkmark-circle" size={14} color={Colors.dark.success} />
+              <Ionicons name="checkmark-circle" size={14} color={themeColors.success} />
               <Text style={styles.detectedText}>
                 Platform detected: {platform}
               </Text>
@@ -198,9 +200,9 @@ export default function AddChatScreen() {
         </View>
 
         <View style={styles.helpBox}>
-          <Ionicons name="help-circle" size={18} color={Colors.dark.textMuted} />
+          <Ionicons name="help-circle" size={18} color={themeColors.textMuted} />
           <Text style={styles.helpText}>
-            Paste the full URL of the stream or chat page. StreamChat will automatically convert it to an embeddable chat view when possible.
+            Cole o link da transmissao, do chat, ou use @usuario. Para @usuario, selecione antes a plataforma correta.
           </Text>
         </View>
       </ScrollView>
@@ -208,10 +210,10 @@ export default function AddChatScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: "row",
@@ -220,12 +222,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   headerTitle: {
     fontSize: 17,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
   },
   scroll: {
     flex: 1,
@@ -240,19 +242,19 @@ const styles = StyleSheet.create({
   label: {
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.textSecondary,
+    color: colors.textSecondary,
     textTransform: "uppercase",
     letterSpacing: 0.5,
   },
   input: {
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     padding: 14,
     fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.text,
+    color: colors.text,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   detectedRow: {
     flexDirection: "row",
@@ -263,7 +265,7 @@ const styles = StyleSheet.create({
   detectedText: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.success,
+    color: colors.success,
   },
   platformGrid: {
     flexDirection: "row",
@@ -276,37 +278,37 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingVertical: 10,
     paddingHorizontal: 14,
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: colors.surface,
     borderRadius: 10,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   platformSelected: {
-    borderColor: Colors.dark.primary,
-    backgroundColor: Colors.dark.primary + "10",
+    borderColor: colors.primary,
+    backgroundColor: colors.primary + "10",
   },
   platformText: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textSecondary,
+    color: colors.textSecondary,
   },
   platformTextSelected: {
-    color: Colors.dark.primary,
+    color: colors.primary,
   },
   helpBox: {
     flexDirection: "row",
     gap: 10,
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     padding: 14,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   helpText: {
     flex: 1,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     lineHeight: 18,
   },
   loadingState: {

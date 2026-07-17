@@ -10,10 +10,11 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import HiddenChatCollector from "./HiddenChatCollector";
 import { ChatConfig } from "@/lib/storage";
 import { globalAggregator, UnifiedChatMessage } from "@/lib/message-aggregator";
+import { useChats } from "@/lib/chat-context";
 
 interface UnifiedTimelineProps {
   chats: ChatConfig[];
@@ -33,17 +34,18 @@ const PLATFORM_LABEL: Record<string, string> = {
   other: "CHAT",
 };
 
-const PLATFORM_COLOR: Record<string, string> = {
-  twitch: Colors.dark.twitch,
-  youtube: Colors.dark.youtube,
-  kick: Colors.dark.kick,
-  facebook: Colors.dark.facebook,
-  tiktok: Colors.dark.tiktok,
-  unknown: Colors.dark.primary,
-  other: Colors.dark.primary,
-};
+function getPlatformColor(platform: string, colors: ThemeColors): string {
+  const platformColors: Record<string, string> = {
+    twitch: colors.twitch, youtube: colors.youtube, kick: colors.kick,
+    facebook: colors.facebook, tiktok: colors.tiktok,
+    unknown: colors.primary, other: colors.primary,
+  };
+  return platformColors[platform] || colors.primary;
+}
 
 function AvatarPlaceholder({ name, color }: { name: string; color: string }) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const initials = name ? name.charAt(0).toUpperCase() : "?";
   return (
     <View style={[styles.avatar, { backgroundColor: color + "30" }]}>
@@ -53,8 +55,10 @@ function AvatarPlaceholder({ name, color }: { name: string; color: string }) {
 }
 
 function PlatformPill({ platform }: { platform: string }) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const label = PLATFORM_LABEL[platform] || "CHAT";
-  const color = PLATFORM_COLOR[platform] || Colors.dark.primary;
+  const color = getPlatformColor(platform, themeColors);
   return (
     <View style={[styles.platformPill, { backgroundColor: color }]}>
       <Text style={styles.platformPillText}>{label}</Text>
@@ -68,7 +72,9 @@ interface MessageItemProps {
 }
 
 function MessageItem({ item, fontSize }: MessageItemProps) {
-  const color = PLATFORM_COLOR[item.platform] || Colors.dark.primary;
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
+  const color = getPlatformColor(item.platform, themeColors);
   const timeStr = new Date(item.timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
@@ -104,6 +110,8 @@ export default function UnifiedTimeline({
   onToggleFullscreen,
   isFullscreen = false,
 }: UnifiedTimelineProps) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const [messages, setMessages] = useState<UnifiedChatMessage[]>([]);
   const [paused, setPaused] = useState(false);
   const [hasNew, setHasNew] = useState(false);
@@ -203,7 +211,7 @@ export default function UnifiedTimeline({
 
       {messages.length === 0 ? (
         <View style={styles.emptyState}>
-          <Ionicons name="radio-outline" size={40} color={Colors.dark.textMuted} />
+          <Ionicons name="radio-outline" size={40} color={themeColors.textMuted} />
           <Text style={styles.emptyTitle}>Waiting for messages...</Text>
           <Text style={styles.emptyDesc}>
             {Platform.OS === "web" && collectibleCount < chats.length
@@ -243,7 +251,7 @@ export default function UnifiedTimeline({
           <Ionicons
             name={paused ? "play" : "pause"}
             size={20}
-            color={paused ? Colors.dark.warning : Colors.dark.textSecondary}
+            color={paused ? themeColors.warning : themeColors.textSecondary}
           />
         </Pressable>
         <Pressable
@@ -274,7 +282,7 @@ export default function UnifiedTimeline({
           <Ionicons
             name={isFullscreen ? "contract" : "expand"}
             size={22}
-            color={isFullscreen ? Colors.dark.primary : Colors.dark.textSecondary}
+            color={isFullscreen ? themeColors.primary : themeColors.textSecondary}
           />
         </Pressable>
       </View>
@@ -282,10 +290,10 @@ export default function UnifiedTimeline({
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#111118",
+    backgroundColor: colors.surface,
     borderRadius: 12,
     overflow: "hidden",
   },
@@ -295,26 +303,26 @@ const styles = StyleSheet.create({
     alignItems: "center",
     paddingHorizontal: 14,
     paddingVertical: 10,
-    backgroundColor: "#111118",
+    backgroundColor: colors.surface,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   liveDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: Colors.dark.kick,
+    backgroundColor: colors.kick,
     marginRight: 6,
   },
   liveText: {
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.kick,
+    color: colors.kick,
   },
   connectedText: {
     fontSize: 13,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.kick,
+    color: colors.kick,
   },
 
   list: {
@@ -375,18 +383,18 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     fontSize: 11,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
   },
   messageTime: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     marginLeft: "auto",
     flexShrink: 0,
   },
   messageText: {
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.text,
+    color: colors.text,
     lineHeight: 20,
   },
 
@@ -400,13 +408,13 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.textSecondary,
+    color: colors.textSecondary,
     marginTop: 8,
   },
   emptyDesc: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     textAlign: "center",
     lineHeight: 18,
   },
@@ -440,9 +448,9 @@ const styles = StyleSheet.create({
     justifyContent: "space-around",
     paddingHorizontal: 20,
     paddingVertical: 12,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     borderTopWidth: 1,
-    borderTopColor: Colors.dark.border,
+    borderTopColor: colors.border,
     borderRadius: 20,
     margin: 8,
     marginTop: 0,
@@ -456,7 +464,7 @@ const styles = StyleSheet.create({
   },
   fontLabel: {
     fontSize: 22,
-    color: Colors.dark.textSecondary,
+    color: colors.textSecondary,
     fontFamily: "Inter_400Regular",
     lineHeight: 26,
   },
@@ -466,6 +474,6 @@ const styles = StyleSheet.create({
   aaText: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.textSecondary,
+    color: colors.textSecondary,
   },
 });

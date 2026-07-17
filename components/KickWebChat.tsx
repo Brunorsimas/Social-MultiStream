@@ -1,7 +1,8 @@
-import React, { useEffect, useRef, useState, useCallback } from "react";
+import React, { useEffect, useRef, useState, useCallback, useMemo } from "react";
 import { View, Text, FlatList, StyleSheet, ActivityIndicator } from "react-native";
 import { getApiUrl } from "@/lib/api-url";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
+import { useChats } from "@/lib/chat-context";
 
 interface KickMessage {
   id: string;
@@ -16,6 +17,8 @@ interface KickWebChatProps {
 }
 
 export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const [messages, setMessages] = useState<KickMessage[]>([]);
   const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [errorMsg, setErrorMsg] = useState("");
@@ -111,13 +114,13 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
         <Text style={[styles.messageText, { fontSize }]}>{item.message}</Text>
       </View>
     ),
-    [fontSize]
+    [fontSize, styles]
   );
 
   if (status === "connecting") {
     return (
       <View style={styles.center}>
-        <ActivityIndicator size="small" color={Colors.dark.kick} />
+        <ActivityIndicator size="small" color={themeColors.kick} />
         <Text style={styles.statusText}>Conectando ao chat...</Text>
       </View>
     );
@@ -155,25 +158,25 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: "#0A0A0F",
+    backgroundColor: colors.background,
   },
   center: {
     flex: 1,
     alignItems: "center",
     justifyContent: "center",
     gap: 8,
-    backgroundColor: "#0A0A0F",
+    backgroundColor: colors.background,
   },
   statusText: {
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
   errorText: {
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
     textAlign: "center",
@@ -192,15 +195,15 @@ const styles = StyleSheet.create({
     paddingVertical: 3,
   },
   userName: {
-    color: Colors.dark.kick,
+    color: colors.kick,
     fontFamily: "Inter_600SemiBold",
   },
   colon: {
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     fontFamily: "Inter_400Regular",
   },
   messageText: {
-    color: Colors.dark.text,
+    color: colors.text,
     fontFamily: "Inter_400Regular",
     flex: 1,
   },

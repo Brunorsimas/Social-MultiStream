@@ -5,17 +5,20 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useFonts, Inter_400Regular, Inter_600SemiBold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { ChatProvider } from "@/lib/chat-context";
-import Colors from "@/constants/colors";
+import { ChatProvider, useChats } from "@/lib/chat-context";
+import { StatusBar } from "expo-status-bar";
 
 SplashScreen.preventAutoHideAsync();
 
 function RootLayoutNav() {
+  const { themeColors, settings } = useChats();
   return (
-    <Stack
+    <>
+      <StatusBar style={settings.theme === "dark" ? "light" : "dark"} />
+      <Stack
       screenOptions={{
         headerShown: false,
-        contentStyle: { backgroundColor: Colors.dark.background },
+        contentStyle: { backgroundColor: themeColors.background },
         animation: "slide_from_right",
       }}
     >
@@ -25,7 +28,8 @@ function RootLayoutNav() {
       <Stack.Screen name="multichat" />
       <Stack.Screen name="single-chat" />
       <Stack.Screen name="platform-login" options={{ animation: "slide_from_bottom" }} />
-    </Stack>
+      </Stack>
+    </>
   );
 }
 

@@ -8,6 +8,7 @@ import {
   getSettings,
   saveSettings,
 } from "./storage";
+import Colors, { ThemeColors } from "@/constants/colors";
 
 interface ChatContextValue {
   chats: ChatConfig[];
@@ -22,6 +23,7 @@ interface ChatContextValue {
   updateSettings: (updates: Partial<AppSettings>) => Promise<void>;
   refreshChats: () => Promise<void>;
   activeChats: ChatConfig[];
+  themeColors: ThemeColors;
 }
 
 const ChatContext = createContext<ChatContextValue | null>(null);
@@ -34,6 +36,7 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     streamerMode: false,
     keepScreenOn: true,
     unifiedMode: false,
+    theme: "dark",
   });
   const [isLoading, setIsLoading] = useState(true);
   const chatsRef = useRef<ChatConfig[]>([]);
@@ -164,6 +167,11 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     [chats]
   );
 
+  const themeColors = useMemo(
+    () => Colors[settings.theme],
+    [settings.theme]
+  );
+
   const value = useMemo(
     () => ({
       chats,
@@ -178,8 +186,9 @@ export function ChatProvider({ children }: { children: ReactNode }) {
       updateSettings,
       refreshChats,
       activeChats,
+      themeColors,
     }),
-    [chats, settings, isLoading, addChat, updateChat, removeChat, toggleChat, togglePin, moveChat, updateSettings, refreshChats, activeChats]
+    [chats, settings, isLoading, addChat, updateChat, removeChat, toggleChat, togglePin, moveChat, updateSettings, refreshChats, activeChats, themeColors]
   );
 
   return <ChatContext.Provider value={value}>{children}</ChatContext.Provider>;

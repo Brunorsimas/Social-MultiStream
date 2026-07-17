@@ -1,17 +1,18 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet, FlatList, Platform, Alert } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import ChatCard from "@/components/ChatCard";
 import { useChats } from "@/lib/chat-context";
 import { ChatConfig } from "@/lib/storage";
 
 export default function ManageScreen() {
   const insets = useSafeAreaInsets();
-  const { chats, toggleChat, togglePin, removeChat, moveChat } = useChats();
+  const { chats, toggleChat, togglePin, removeChat, moveChat, themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const webBottomInset = Platform.OS === "web" ? 34 : 0;
 
@@ -60,7 +61,7 @@ export default function ManageScreen() {
     <View style={styles.container}>
       <View style={[styles.header, { paddingTop: insets.top + webTopInset + 12 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
-          <Ionicons name="chevron-back" size={24} color={Colors.dark.text} />
+          <Ionicons name="chevron-back" size={24} color={themeColors.text} />
         </Pressable>
         <Text style={styles.headerTitle}>Manage Chats</Text>
         <Pressable
@@ -70,7 +71,7 @@ export default function ManageScreen() {
           }}
           hitSlop={12}
         >
-          <Ionicons name="add" size={26} color={Colors.dark.primary} />
+          <Ionicons name="add" size={26} color={themeColors.primary} />
         </Pressable>
       </View>
 
@@ -84,7 +85,7 @@ export default function ManageScreen() {
         ]}
         ListEmptyComponent={
           <View style={styles.emptyState}>
-            <Ionicons name="chatbubbles-outline" size={48} color={Colors.dark.textMuted} />
+            <Ionicons name="chatbubbles-outline" size={48} color={themeColors.textMuted} />
             <Text style={styles.emptyTitle}>No chats yet</Text>
             <Text style={styles.emptyDesc}>
               Add your first stream chat to get started
@@ -93,7 +94,7 @@ export default function ManageScreen() {
               onPress={() => router.push("/add-chat" as any)}
               style={({ pressed }) => [styles.addBtn, pressed && { opacity: 0.8 }]}
             >
-              <Ionicons name="add" size={20} color={Colors.dark.background} />
+              <Ionicons name="add" size={20} color={themeColors.background} />
               <Text style={styles.addBtnText}>Add Chat</Text>
             </Pressable>
           </View>
@@ -103,10 +104,10 @@ export default function ManageScreen() {
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
   },
   header: {
     flexDirection: "row",
@@ -115,12 +116,12 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingBottom: 12,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   headerTitle: {
     fontSize: 17,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
   },
   listContent: {
     padding: 16,
@@ -134,20 +135,20 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
     marginTop: 8,
   },
   emptyDesc: {
     fontSize: 14,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     textAlign: "center",
   },
   addBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: 6,
-    backgroundColor: Colors.dark.primary,
+    backgroundColor: colors.primary,
     paddingVertical: 12,
     paddingHorizontal: 20,
     borderRadius: 12,
@@ -156,6 +157,6 @@ const styles = StyleSheet.create({
   addBtnText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.background,
+    color: colors.background,
   },
 });

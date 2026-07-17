@@ -1,12 +1,13 @@
-import React, { useRef, useState } from "react";
+import React, { useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, FlatList } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getCurrentEmbedDomain, getKickChannelName } from "@/lib/chat-url";
+import { useChats } from "@/lib/chat-context";
 
 interface MergedChatViewProps {
   chats: ChatConfig[];
@@ -20,6 +21,8 @@ interface TabItemProps {
 }
 
 function TabItem({ chat, isActive, onPress }: TabItemProps) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   return (
     <Pressable
       onPress={onPress}
@@ -29,17 +32,20 @@ function TabItem({ chat, isActive, onPress }: TabItemProps) {
       <Text style={[styles.tabText, isActive && styles.tabTextActive]} numberOfLines={1}>
         {chat.name}
       </Text>
-      {chat.pinned && <Ionicons name="pin" size={10} color={Colors.dark.warning} />}
+      {chat.pinned && <Ionicons name="pin" size={10} color={themeColors.warning} />}
     </Pressable>
   );
 }
 
 export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewProps) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const [activeIndex, setActiveIndex] = useState(0);
   const webViewRefs = useRef<Record<string, WebView | null>>({});
   const [loadingStates, setLoadingStates] = useState<Record<string, boolean>>(
     Object.fromEntries(chats.map((c) => [c.id, true]))
   );
+  const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
 
   const safeIndex = Math.min(activeIndex, chats.length - 1);
   const activeChat = chats[safeIndex] || chats[0];
@@ -49,7 +55,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
   const injectedCSS = `
     (function() {
       var style = document.createElement('style');
-      style.textContent = 'body { font-size: ${fontSize}px !important; background: #0A0A0F !important; } * { font-size: inherit; }';
+      style.textContent = 'body { font-size: ${fontSize}px !important; background: ${themeColors.background} !important; color: ${themeColors.text} !important; } * { font-size: inherit; }';
       document.head.appendChild(style);
     })();
     true;
@@ -57,6 +63,14 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
 
   const handleLoadEnd = (chatId: string) => {
     setLoadingStates((prev) => ({ ...prev, [chatId]: false }));
+  };
+
+  const handleNavigationChange = (chat: ChatConfig, url: string) => {
+    if (chat.platform !== "youtube") return;
+    const resolvedUrl = getChatEmbedUrl(url);
+    if (resolvedUrl.includes("/live_chat?") && resolvedUrls[chat.id] !== resolvedUrl) {
+      setResolvedUrls((prev) => ({ ...prev, [chat.id]: resolvedUrl }));
+    }
   };
 
   return (
@@ -95,7 +109,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 ) : (
                   <iframe
                     src={embedUrl}
-                    style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
+                    style={{ width: "100%", height: "100%", border: "none", backgroundColor: themeColors.background } as any}
                     allow="autoplay"
                   />
                 )}
@@ -114,15 +128,16 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
             >
               {loadingStates[chat.id] && isVisible && (
                 <View style={styles.loadingOverlay}>
-                  <ActivityIndicator size="small" color={Colors.dark.primary} />
+                  <ActivityIndicator size="small" color={themeColors.primary} />
                   <Text style={styles.loadingText}>Loading {chat.name}...</Text>
                 </View>
               )}
               <WebView
                 ref={(ref) => { webViewRefs.current[chat.id] = ref; }}
-                source={{ uri: embedUrl }}
+                source={{ uri: resolvedUrls[chat.id] || embedUrl }}
                 style={styles.webview}
                 onLoadEnd={() => handleLoadEnd(chat.id)}
+                onNavigationStateChange={({ url }) => handleNavigationChange(chat, url)}
                 injectedJavaScript={injectedCSS}
                 javaScriptEnabled
                 domStorageEnabled
@@ -149,19 +164,19 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: colors.surface,
     borderRadius: 12,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   tabBar: {
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
+    borderBottomColor: colors.borderLight,
   },
   tabBarContent: {
     paddingHorizontal: 8,
@@ -175,22 +190,22 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     paddingHorizontal: 12,
     borderRadius: 8,
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   tabActive: {
-    backgroundColor: Colors.dark.primary + "18",
-    borderColor: Colors.dark.primary + "50",
+    backgroundColor: colors.primary + "18",
+    borderColor: colors.primary + "50",
   },
   tabText: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     maxWidth: 100,
   },
   tabTextActive: {
-    color: Colors.dark.primary,
+    color: colors.primary,
     fontFamily: "Inter_600SemiBold",
   },
   chatContainer: {
@@ -212,12 +227,12 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: Colors.dark.background,
+    backgroundColor: colors.background,
     gap: 8,
     zIndex: 10,
   },
   loadingText: {
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
@@ -226,18 +241,18 @@ const styles = StyleSheet.create({
     justifyContent: "center",
     gap: 5,
     paddingVertical: 8,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     borderTopWidth: 1,
-    borderTopColor: Colors.dark.borderLight,
+    borderTopColor: colors.borderLight,
   },
   dot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    backgroundColor: Colors.dark.textMuted + "40",
+    backgroundColor: colors.textMuted + "40",
   },
   dotActive: {
-    backgroundColor: Colors.dark.primary,
+    backgroundColor: colors.primary,
     width: 16,
   },
 });

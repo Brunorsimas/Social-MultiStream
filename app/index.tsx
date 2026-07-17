@@ -5,48 +5,67 @@ import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
 import { useChats } from "@/lib/chat-context";
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { chats, activeChats } = useChats();
+  const { chats, activeChats, settings, updateSettings, themeColors } = useChats();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const webBottomInset = Platform.OS === "web" ? 34 : 0;
+  const isDark = settings.theme === "dark";
 
   const navigate = (path: string) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     router.push(path as any);
   };
 
+  const toggleTheme = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    void updateSettings({ theme: isDark ? "light" : "dark" });
+  };
+
   return (
-    <View style={styles.container}>
-      <StatusBar barStyle="light-content" />
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
+      <StatusBar barStyle={isDark ? "light-content" : "dark-content"} />
       <View style={[styles.content, { paddingTop: insets.top + webTopInset + 20, paddingBottom: insets.bottom + webBottomInset + 20 }]}>
-        <View style={styles.heroSection}>
-          <View style={styles.logoRow}>
-            <View style={styles.logoIcon}>
-              <MaterialCommunityIcons name="message-flash" size={28} color={Colors.dark.primary} />
-            </View>
-          </View>
-          <Text style={styles.title}>StreamChat</Text>
-          <Text style={styles.subtitle}>All your live chats in one place</Text>
+        {/* Theme toggle in top-right */}
+        <View style={styles.themeToggleRow}>
+          <Pressable
+            onPress={toggleTheme}
+            style={[styles.themeToggleBtn, { backgroundColor: themeColors.surface, borderColor: themeColors.borderLight }]}
+          >
+            <Ionicons
+              name={isDark ? "sunny" : "moon"}
+              size={18}
+              color={isDark ? themeColors.warning : themeColors.secondary}
+            />
+          </Pressable>
         </View>
 
-        <View style={styles.statsRow}>
-          <View style={styles.statCard}>
-            <Text style={styles.statNumber}>{chats.length}</Text>
-            <Text style={styles.statLabel}>Total</Text>
+        <View style={styles.heroSection}>
+          <View style={styles.logoRow}>
+            <View style={[styles.logoIcon, { backgroundColor: themeColors.primary + "15", borderColor: themeColors.primary + "30" }]}>
+              <MaterialCommunityIcons name="message-flash" size={28} color={themeColors.primary} />
+            </View>
           </View>
-          <View style={styles.statDivider} />
+          <Text style={[styles.title, { color: themeColors.text }]}>StreamChat</Text>
+          <Text style={[styles.subtitle, { color: themeColors.textSecondary }]}>All your live chats in one place</Text>
+        </View>
+
+        <View style={[styles.statsRow, { backgroundColor: themeColors.surface, borderColor: themeColors.borderLight }]}>
           <View style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: Colors.dark.success }]}>{activeChats.length}</Text>
-            <Text style={styles.statLabel}>Active</Text>
+            <Text style={[styles.statNumber, { color: themeColors.text }]}>{chats.length}</Text>
+            <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Total</Text>
           </View>
-          <View style={styles.statDivider} />
+          <View style={[styles.statDivider, { backgroundColor: themeColors.border }]} />
           <View style={styles.statCard}>
-            <Text style={[styles.statNumber, { color: Colors.dark.warning }]}>{chats.filter(c => c.pinned).length}</Text>
-            <Text style={styles.statLabel}>Pinned</Text>
+            <Text style={[styles.statNumber, { color: themeColors.success }]}>{activeChats.length}</Text>
+            <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Active</Text>
+          </View>
+          <View style={[styles.statDivider, { backgroundColor: themeColors.border }]} />
+          <View style={styles.statCard}>
+            <Text style={[styles.statNumber, { color: themeColors.warning }]}>{chats.filter(c => c.pinned).length}</Text>
+            <Text style={[styles.statLabel, { color: themeColors.textMuted }]}>Pinned</Text>
           </View>
         </View>
 
@@ -55,43 +74,43 @@ export default function HomeScreen() {
           style={({ pressed }) => [styles.primaryBtn, pressed && styles.btnPressed]}
         >
           <LinearGradient
-            colors={[Colors.dark.primary, Colors.dark.primaryDim]}
+            colors={[themeColors.primary, themeColors.primaryDim]}
             start={{ x: 0, y: 0 }}
             end={{ x: 1, y: 1 }}
             style={styles.primaryGradient}
           >
-            <MaterialCommunityIcons name="view-grid" size={22} color="#000" />
-            <Text style={styles.primaryBtnText}>Open MultiChat</Text>
+            <MaterialCommunityIcons name="view-grid" size={22} color={isDark ? "#000" : "#FFF"} />
+            <Text style={[styles.primaryBtnText, { color: isDark ? "#000" : "#FFF" }]}>Open MultiChat</Text>
           </LinearGradient>
         </Pressable>
 
         <View style={styles.actionsGrid}>
           <Pressable
             onPress={() => navigate("/add-chat")}
-            style={({ pressed }) => [styles.actionCard, pressed && styles.actionPressed]}
+            style={({ pressed }) => [styles.actionCard, { backgroundColor: themeColors.surface, borderColor: themeColors.borderLight }, pressed && styles.actionPressed]}
           >
-            <View style={[styles.actionIconWrap, { backgroundColor: Colors.dark.secondary + "20" }]}>
-              <Ionicons name="add-circle" size={24} color={Colors.dark.secondary} />
+            <View style={[styles.actionIconWrap, { backgroundColor: themeColors.secondary + "20" }]}>
+              <Ionicons name="add-circle" size={24} color={themeColors.secondary} />
             </View>
-            <Text style={styles.actionTitle}>Add Chat</Text>
-            <Text style={styles.actionDesc}>Register a new stream chat</Text>
+            <Text style={[styles.actionTitle, { color: themeColors.text }]}>Add Chat</Text>
+            <Text style={[styles.actionDesc, { color: themeColors.textMuted }]}>Register a new stream chat</Text>
           </Pressable>
 
           <Pressable
             onPress={() => navigate("/manage")}
-            style={({ pressed }) => [styles.actionCard, pressed && styles.actionPressed]}
+            style={({ pressed }) => [styles.actionCard, { backgroundColor: themeColors.surface, borderColor: themeColors.borderLight }, pressed && styles.actionPressed]}
           >
-            <View style={[styles.actionIconWrap, { backgroundColor: Colors.dark.primary + "20" }]}>
-              <Ionicons name="settings-sharp" size={24} color={Colors.dark.primary} />
+            <View style={[styles.actionIconWrap, { backgroundColor: themeColors.primary + "20" }]}>
+              <Ionicons name="settings-sharp" size={24} color={themeColors.primary} />
             </View>
-            <Text style={styles.actionTitle}>Manage</Text>
-            <Text style={styles.actionDesc}>Edit, reorder & configure</Text>
+            <Text style={[styles.actionTitle, { color: themeColors.text }]}>Manage</Text>
+            <Text style={[styles.actionDesc, { color: themeColors.textMuted }]}>Edit, reorder & configure</Text>
           </Pressable>
         </View>
 
         <View style={styles.quickTip}>
-          <Ionicons name="information-circle" size={16} color={Colors.dark.textMuted} />
-          <Text style={styles.tipText}>
+          <Ionicons name="information-circle" size={16} color={themeColors.textMuted} />
+          <Text style={[styles.tipText, { color: themeColors.textMuted }]}>
             Add chat URLs from Twitch, YouTube, Kick or any platform
           </Text>
         </View>
@@ -103,12 +122,27 @@ export default function HomeScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
   },
   content: {
     flex: 1,
     paddingHorizontal: 20,
     justifyContent: "center",
+  },
+  themeToggleRow: {
+    position: "absolute",
+    top: 0,
+    right: 0,
+    zIndex: 10,
+    paddingRight: 20,
+    paddingTop: 4,
+  },
+  themeToggleBtn: {
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 1,
   },
   heroSection: {
     alignItems: "center",
@@ -121,31 +155,25 @@ const styles = StyleSheet.create({
     width: 56,
     height: 56,
     borderRadius: 16,
-    backgroundColor: Colors.dark.primary + "15",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: Colors.dark.primary + "30",
   },
   title: {
     fontSize: 32,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
     marginBottom: 6,
   },
   subtitle: {
     fontSize: 15,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textSecondary,
   },
   statsRow: {
     flexDirection: "row",
-    backgroundColor: Colors.dark.surface,
     borderRadius: 14,
     padding: 16,
     marginBottom: 24,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
     alignItems: "center",
   },
   statCard: {
@@ -155,18 +183,15 @@ const styles = StyleSheet.create({
   statNumber: {
     fontSize: 24,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
   },
   statLabel: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
     marginTop: 2,
   },
   statDivider: {
     width: 1,
     height: 30,
-    backgroundColor: Colors.dark.border,
   },
   primaryBtn: {
     marginBottom: 16,
@@ -188,7 +213,6 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     fontSize: 16,
     fontFamily: "Inter_600SemiBold",
-    color: "#000",
   },
   actionsGrid: {
     flexDirection: "row",
@@ -197,11 +221,9 @@ const styles = StyleSheet.create({
   },
   actionCard: {
     flex: 1,
-    backgroundColor: Colors.dark.surface,
     borderRadius: 14,
     padding: 16,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
   },
   actionPressed: {
     opacity: 0.8,
@@ -218,13 +240,11 @@ const styles = StyleSheet.create({
   actionTitle: {
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
     marginBottom: 4,
   },
   actionDesc: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
   },
   quickTip: {
     flexDirection: "row",
@@ -235,7 +255,6 @@ const styles = StyleSheet.create({
   tipText: {
     fontSize: 12,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
     flex: 1,
   },
 });

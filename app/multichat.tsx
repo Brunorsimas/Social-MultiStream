@@ -6,7 +6,6 @@ import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
 import { useKeepAwake } from "expo-keep-awake";
 import * as Haptics from "expo-haptics";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
-import Colors from "@/constants/colors";
 import ChatWebView from "@/components/ChatWebView";
 import MergedChatView from "@/components/MergedChatView";
 import UnifiedTimeline from "@/components/UnifiedTimeline";
@@ -21,12 +20,13 @@ function KeepAwakeGuard() {
 
 export default function MultiChatScreen() {
   const insets = useSafeAreaInsets();
-  const { activeChats, settings, updateSettings, togglePin } = useChats();
+  const { activeChats, settings, updateSettings, togglePin, themeColors } = useChats();
   const [showControls, setShowControls] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const layout: LayoutMode = settings.layout;
   const fontSize = settings.fontSize;
   const unifiedMode = settings.unifiedMode;
+  const isDark = settings.theme === "dark";
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const { width: screenWidth } = useWindowDimensions();
 
@@ -50,6 +50,11 @@ export default function MultiChatScreen() {
       setFullscreen(false);
       setShowControls(true);
     }
+  };
+
+  const toggleTheme = () => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    persistSettings({ theme: isDark ? "light" : "dark" });
   };
 
   const cycleLayout = () => {
@@ -91,14 +96,14 @@ export default function MultiChatScreen() {
     if (activeChats.length === 0) {
       return (
         <View style={styles.emptyState}>
-          <Ionicons name="chatbubbles-outline" size={48} color={Colors.dark.textMuted} />
-          <Text style={styles.emptyTitle}>No active chats</Text>
-          <Text style={styles.emptyDesc}>Enable some chats from the Manage screen</Text>
+          <Ionicons name="chatbubbles-outline" size={48} color={themeColors.textMuted} />
+          <Text style={[styles.emptyTitle, { color: themeColors.text }]}>No active chats</Text>
+          <Text style={[styles.emptyDesc, { color: themeColors.textMuted }]}>Enable some chats from the Manage screen</Text>
           <Pressable
             onPress={() => router.push("/manage" as any)}
-            style={({ pressed }) => [styles.emptyBtn, pressed && { opacity: 0.8 }]}
+            style={({ pressed }) => [styles.emptyBtn, { backgroundColor: themeColors.primary }, pressed && { opacity: 0.8 }]}
           >
-            <Text style={styles.emptyBtnText}>Manage Chats</Text>
+            <Text style={[styles.emptyBtnText, { color: themeColors.background }]}>Manage Chats</Text>
           </Pressable>
         </View>
       );
@@ -164,45 +169,56 @@ export default function MultiChatScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { backgroundColor: themeColors.background }]}>
       {settings.keepScreenOn && <KeepAwakeGuard />}
       {showControls && (
         <Animated.View
           entering={FadeIn.duration(200)}
           exiting={FadeOut.duration(200)}
-          style={[styles.toolbar, { paddingTop: insets.top + webTopInset + 8 }]}
+          style={[styles.toolbar, { paddingTop: insets.top + webTopInset + 8, backgroundColor: themeColors.surface + "F0", borderBottomColor: themeColors.borderLight }]}
         >
           <Pressable onPress={() => router.back()} hitSlop={12}>
-            <Ionicons name="chevron-back" size={24} color={Colors.dark.text} />
+            <Ionicons name="chevron-back" size={24} color={themeColors.text} />
           </Pressable>
 
           <View style={styles.toolbarCenter}>
-            <Text style={styles.toolbarTitle}>
+            <Text style={[styles.toolbarTitle, { color: themeColors.textSecondary }]}>
               {activeChats.length} chat{activeChats.length !== 1 ? "s" : ""} · {getLayoutLabel()}
             </Text>
           </View>
 
           <View style={styles.toolbarActions}>
             <Pressable
+              onPress={toggleTheme}
+              hitSlop={8}
+              style={styles.toolBtn}
+            >
+              <Ionicons
+                name={isDark ? "sunny" : "moon"}
+                size={18}
+                color={isDark ? themeColors.warning : themeColors.secondary}
+              />
+            </Pressable>
+            <Pressable
               onPress={() => persistSettings({ keepScreenOn: !settings.keepScreenOn })}
               hitSlop={8}
               style={styles.toolBtn}
             >
               <Ionicons
-                name={settings.keepScreenOn ? "sunny" : "sunny-outline"}
+                name={settings.keepScreenOn ? "eye" : "eye-off-outline"}
                 size={18}
-                color={settings.keepScreenOn ? Colors.dark.warning : Colors.dark.textMuted}
+                color={settings.keepScreenOn ? themeColors.warning : themeColors.textMuted}
               />
             </Pressable>
             <Pressable onPress={() => adjustFontSize(-1)} hitSlop={8} style={styles.toolBtn}>
-              <MaterialCommunityIcons name="format-font-size-decrease" size={18} color={Colors.dark.textSecondary} />
+              <MaterialCommunityIcons name="format-font-size-decrease" size={18} color={themeColors.textSecondary} />
             </Pressable>
             <Pressable onPress={() => adjustFontSize(1)} hitSlop={8} style={styles.toolBtn}>
-              <MaterialCommunityIcons name="format-font-size-increase" size={18} color={Colors.dark.textSecondary} />
+              <MaterialCommunityIcons name="format-font-size-increase" size={18} color={themeColors.textSecondary} />
             </Pressable>
             {!unifiedMode && (
               <Pressable onPress={cycleLayout} hitSlop={8} style={styles.toolBtn}>
-                <MaterialCommunityIcons name={getLayoutIcon() as any} size={18} color={Colors.dark.primary} />
+                <MaterialCommunityIcons name={getLayoutIcon() as any} size={18} color={themeColors.primary} />
               </Pressable>
             )}
           </View>
@@ -213,17 +229,17 @@ export default function MultiChatScreen() {
         <Animated.View
           entering={FadeIn.duration(200)}
           exiting={FadeOut.duration(200)}
-          style={styles.unifiedToggleBar}
+          style={[styles.unifiedToggleBar, { backgroundColor: themeColors.surface, borderBottomColor: themeColors.borderLight }]}
         >
-          <Ionicons name="layers" size={16} color={unifiedMode ? Colors.dark.primary : Colors.dark.textMuted} />
-          <Text style={[styles.unifiedToggleText, unifiedMode && styles.unifiedToggleTextActive]}>
+          <Ionicons name="layers" size={16} color={unifiedMode ? themeColors.primary : themeColors.textMuted} />
+          <Text style={[styles.unifiedToggleText, { color: unifiedMode ? themeColors.primary : themeColors.textMuted, fontFamily: unifiedMode ? "Inter_600SemiBold" : "Inter_400Regular" }]}>
             Unified Mode
           </Text>
           <Switch
             value={unifiedMode}
             onValueChange={toggleUnifiedMode}
-            trackColor={{ false: Colors.dark.border, true: Colors.dark.primary + "60" }}
-            thumbColor={unifiedMode ? Colors.dark.primary : Colors.dark.textMuted}
+            trackColor={{ false: themeColors.border, true: themeColors.primary + "60" }}
+            thumbColor={unifiedMode ? themeColors.primary : themeColors.textMuted}
             style={{ transform: [{ scale: 0.8 }] }}
           />
         </Animated.View>
@@ -245,12 +261,12 @@ export default function MultiChatScreen() {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             setShowControls(!showControls);
           }}
-          style={[styles.toggleFab, { bottom: insets.bottom + 16 }]}
+          style={[styles.toggleFab, { bottom: insets.bottom + 16, backgroundColor: themeColors.surfaceElevated + "E0", borderColor: themeColors.border }]}
         >
           <Ionicons
             name={showControls ? "eye-off" : "eye"}
             size={20}
-            color={Colors.dark.text}
+            color={themeColors.text}
           />
         </Pressable>
       )}
@@ -261,16 +277,13 @@ export default function MultiChatScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
   },
   toolbar: {
     flexDirection: "row",
     alignItems: "center",
     paddingHorizontal: 16,
     paddingBottom: 10,
-    backgroundColor: Colors.dark.surface + "F0",
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
     zIndex: 10,
   },
   toolbarCenter: {
@@ -280,7 +293,6 @@ const styles = StyleSheet.create({
   toolbarTitle: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.textSecondary,
   },
   toolbarActions: {
     flexDirection: "row",
@@ -299,19 +311,11 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 6,
-    backgroundColor: Colors.dark.surface,
     borderBottomWidth: 1,
-    borderBottomColor: Colors.dark.borderLight,
   },
   unifiedToggleText: {
     flex: 1,
     fontSize: 13,
-    fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
-  },
-  unifiedToggleTextActive: {
-    color: Colors.dark.primary,
-    fontFamily: "Inter_600SemiBold",
   },
   chatArea: {
     flex: 1,
@@ -356,17 +360,14 @@ const styles = StyleSheet.create({
   emptyTitle: {
     fontSize: 18,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
     marginTop: 8,
   },
   emptyDesc: {
     fontSize: 14,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
     textAlign: "center",
   },
   emptyBtn: {
-    backgroundColor: Colors.dark.primary,
     paddingVertical: 10,
     paddingHorizontal: 20,
     borderRadius: 10,
@@ -375,7 +376,6 @@ const styles = StyleSheet.create({
   emptyBtnText: {
     fontSize: 14,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.background,
   },
   toggleFab: {
     position: "absolute",
@@ -383,11 +383,9 @@ const styles = StyleSheet.create({
     width: 44,
     height: 44,
     borderRadius: 22,
-    backgroundColor: Colors.dark.surfaceElevated + "E0",
     alignItems: "center",
     justifyContent: "center",
     borderWidth: 1,
-    borderColor: Colors.dark.border,
     zIndex: 20,
   },
 });

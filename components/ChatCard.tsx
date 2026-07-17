@@ -1,10 +1,11 @@
-import React from "react";
+import React, { useMemo } from "react";
 import { View, Text, Pressable, StyleSheet, Switch } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import { ChatConfig } from "@/lib/storage";
+import { useChats } from "@/lib/chat-context";
 
 interface ChatCardProps {
   chat: ChatConfig;
@@ -31,6 +32,8 @@ export default function ChatCard({
   isFirst,
   isLast,
 }: ChatCardProps) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   return (
     <View style={[styles.card, !chat.enabled && styles.cardDisabled]}>
       <View style={styles.header}>
@@ -49,8 +52,8 @@ export default function ChatCard({
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
             onToggle();
           }}
-          trackColor={{ false: Colors.dark.border, true: Colors.dark.primary + "60" }}
-          thumbColor={chat.enabled ? Colors.dark.primary : Colors.dark.textMuted}
+          trackColor={{ false: themeColors.border, true: themeColors.primary + "60" }}
+          thumbColor={chat.enabled ? themeColors.primary : themeColors.textMuted}
         />
       </View>
       <View style={styles.actions}>
@@ -64,7 +67,7 @@ export default function ChatCard({
           <Ionicons
             name={chat.pinned ? "pin" : "pin-outline"}
             size={18}
-            color={chat.pinned ? Colors.dark.warning : Colors.dark.textMuted}
+            color={chat.pinned ? themeColors.warning : themeColors.textMuted}
           />
         </Pressable>
         {!isFirst && (
@@ -75,7 +78,7 @@ export default function ChatCard({
             }}
             style={styles.actionBtn}
           >
-            <Ionicons name="chevron-up" size={18} color={Colors.dark.textMuted} />
+            <Ionicons name="chevron-up" size={18} color={themeColors.textMuted} />
           </Pressable>
         )}
         {!isLast && (
@@ -86,7 +89,7 @@ export default function ChatCard({
             }}
             style={styles.actionBtn}
           >
-            <Ionicons name="chevron-down" size={18} color={Colors.dark.textMuted} />
+            <Ionicons name="chevron-down" size={18} color={themeColors.textMuted} />
           </Pressable>
         )}
         <View style={styles.spacer} />
@@ -97,7 +100,7 @@ export default function ChatCard({
           }}
           style={styles.actionBtn}
         >
-          <Ionicons name="open-outline" size={18} color={Colors.dark.textSecondary} />
+          <Ionicons name="open-outline" size={18} color={themeColors.textSecondary} />
         </Pressable>
         <Pressable
           onPress={() => {
@@ -106,7 +109,7 @@ export default function ChatCard({
           }}
           style={styles.actionBtn}
         >
-          <Ionicons name="create-outline" size={18} color={Colors.dark.primary} />
+          <Ionicons name="create-outline" size={18} color={themeColors.primary} />
         </Pressable>
         <Pressable
           onPress={() => {
@@ -115,21 +118,21 @@ export default function ChatCard({
           }}
           style={styles.actionBtn}
         >
-          <Ionicons name="trash-outline" size={18} color={Colors.dark.error} />
+          <Ionicons name="trash-outline" size={18} color={themeColors.error} />
         </Pressable>
       </View>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   card: {
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: colors.surface,
     borderRadius: 14,
     padding: 14,
     marginBottom: 10,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   cardDisabled: {
     opacity: 0.5,
@@ -144,12 +147,12 @@ const styles = StyleSheet.create({
     gap: 2,
   },
   name: {
-    color: Colors.dark.text,
+    color: colors.text,
     fontSize: 15,
     fontFamily: "Inter_600SemiBold",
   },
   url: {
-    color: Colors.dark.textMuted,
+    color: colors.textMuted,
     fontSize: 12,
     fontFamily: "Inter_400Regular",
   },
@@ -159,7 +162,7 @@ const styles = StyleSheet.create({
     marginTop: 10,
     paddingTop: 10,
     borderTopWidth: 1,
-    borderTopColor: Colors.dark.borderLight,
+    borderTopColor: colors.borderLight,
     gap: 4,
   },
   actionBtn: {
