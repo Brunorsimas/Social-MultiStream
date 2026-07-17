@@ -12,7 +12,7 @@ export function normalizeChatUrl(rawUrl: string, platformHint?: string): string 
   if (/^@[a-z\d_.-]{1,40}$/i.test(value)) {
     const handle = value.slice(1);
     if (platformHint === "youtube") return `https://www.youtube.com/@${handle}/live`;
-    if (platformHint === "kick") return `https://kick.com/${handle}/chatroom`;
+    if (platformHint === "kick") return `https://kick.com/${handle}/chat`;
     return `https://www.twitch.tv/${handle}/chat`;
   }
 
@@ -34,7 +34,7 @@ export function normalizeChatUrl(rawUrl: string, platformHint?: string): string 
     }
     if (isHost(hostname, "kick.com")) {
       const channel = parts[0]?.replace(/^@/, "");
-      if (channel && /^[a-z\d_]{1,40}$/i.test(channel)) return `https://kick.com/${channel}/chatroom`;
+      if (channel && /^[a-z\d_]{1,40}$/i.test(channel)) return `https://kick.com/${channel}/chat`;
     }
     if (isHost(hostname, "youtube.com")) {
       const videoId = url.searchParams.get("v");
@@ -77,7 +77,18 @@ export function getKickChannelName(rawUrl: string): string | null {
   const normalized = normalizeChatUrl(rawUrl);
   if (!normalized || detectPlatform(normalized) !== "kick") return null;
   const channel = firstPathSegment(new URL(normalized));
-  const reserved = ["browse", "categories", "dashboard", "following", "search", "settings"];
+  const reserved = [
+    "browse",
+    "categories",
+    "chat",
+    "chatroom",
+    "dashboard",
+    "following",
+    "login",
+    "search",
+    "settings",
+    "signup",
+  ];
   return channel && !reserved.includes(channel.toLowerCase()) && /^[a-z\d_]{1,40}$/i.test(channel)
     ? channel
     : null;
@@ -163,7 +174,7 @@ export function getChatEmbedUrl(rawUrl: string, embedDomain?: string): string {
 
   if (platform === "kick") {
     const channel = getKickChannelName(normalized);
-    if (channel) return `https://kick.com/${encodeURIComponent(channel)}/chatroom`;
+    if (channel) return `https://kick.com/${encodeURIComponent(channel)}/chat`;
   }
 
   return normalized;

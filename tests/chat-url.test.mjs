@@ -29,6 +29,19 @@ test("extracts only valid Kick channel names", () => {
   assert.equal(getKickChannelName("https://kick.com/example_name"), "example_name");
   assert.equal(getKickChannelName("https://kick.com/not-valid!"), null);
   assert.equal(getKickChannelName("https://kick.com/categories"), null);
+  assert.equal(getKickChannelName("https://kick.com/chat"), null);
+  assert.equal(getKickChannelName("https://kick.com/login"), null);
+});
+
+test("builds the current Kick public chat route", () => {
+  assert.equal(
+    getChatEmbedUrl("https://kick.com/gaules"),
+    "https://kick.com/gaules/chat",
+  );
+  assert.equal(
+    getChatEmbedUrl("https://kick.com/gaules/chatroom"),
+    "https://kick.com/gaules/chat",
+  );
 });
 
 test("rejects known platform pages that cannot identify a chat", () => {
@@ -39,9 +52,9 @@ test("rejects known platform pages that cannot identify a chat", () => {
 
 test("normalizes chat paths and @handles using the selected platform", () => {
   assert.equal(normalizeChatUrl("@gaules", "twitch"), "https://www.twitch.tv/gaules/chat");
-  assert.equal(normalizeChatUrl("@gaules", "kick"), "https://kick.com/gaules/chatroom");
+  assert.equal(normalizeChatUrl("@gaules", "kick"), "https://kick.com/gaules/chat");
   assert.equal(normalizeChatUrl("@creator", "youtube"), "https://www.youtube.com/@creator/live");
-  assert.equal(normalizeChatUrl("kick.com/@gaules/chat"), "https://kick.com/gaules/chatroom");
+  assert.equal(normalizeChatUrl("kick.com/@gaules/chat"), "https://kick.com/gaules/chat");
   assert.equal(normalizeChatUrl("twitch.tv/@gaules/chat"), "https://www.twitch.tv/gaules/chat");
   assert.equal(
     normalizeChatUrl("youtube.com/chat?v=video-id"),
