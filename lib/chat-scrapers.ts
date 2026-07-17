@@ -187,21 +187,43 @@ export function getKickScraper(chatId: string, chatName: string): string {
   const serializedChatName = JSON.stringify(chatName);
   return `
 (function() {
-  if (window.__streamchat_init) return true;
-  window.__streamchat_init = true;
+  if (window.__streamchat_kick_dom_init) return true;
+  window.__streamchat_kick_dom_init = true;
 
   var chatId = ${serializedChatId};
   var chatName = ${serializedChatName};
   var processed = new WeakSet();
   var sequence = 0;
+  var rowSelector = [
+    '[data-chat-entry]',
+    '[data-message-id]',
+    '[data-testid="chat-message"]',
+    '[data-testid*="chat-entry"]',
+    '[class*="chat-entry"]',
+    '[class*="chat-message"]',
+    '.message-container'
+  ].join(',');
+  var userSelector = [
+    '[data-chat-username]',
+    '[data-testid*="username"]',
+    '[class*="chat-entry-username"]',
+    '.chat-entry-username',
+    '[class*="username"]'
+  ].join(',');
+  var contentSelector = [
+    '[data-chat-message]',
+    '[data-testid*="message-content"]',
+    '[class*="chat-entry-content"]',
+    '.chat-entry-content',
+    '[class*="message-content"]'
+  ].join(',');
 
   function processElement(el) {
-    var userEl = el.querySelector
-      ? el.querySelector('[class*="chat-entry-username"], .chat-entry-username, [class*="username"]')
-      : null;
-    var msgEl = el.querySelector
-      ? el.querySelector('[class*="chat-entry-content"], .chat-entry-content, [class*="message-content"]')
-      : null;
+    if (!el || !el.querySelector || processed.has(el)) return null;
+    if (window.__streamchat_kick_socket_message_received) return null;
+
+    var userEl = el.querySelector(userSelector);
+    var msgEl = el.querySelector(contentSelector);
 
     var userName, message;
 
@@ -210,17 +232,20 @@ export function getKickScraper(chatId: string, chatName: string): string {
       message = msgEl.textContent.trim();
     } else {
       var allText = el.textContent ? el.textContent.trim() : '';
-      if (allText.length < 3 || !allText.includes(':')) return null;
+      if (allText.length < 3 || allText.length > 1000 || !allText.includes(':')) return null;
       var parts = allText.split(':');
       userName = parts[0].trim();
       message = parts.slice(1).join(':').trim();
     }
 
-    if (!userName || !message) return null;
+    if (!userName || !message || userName.length > 80) return null;
 
-    if (processed.has(el)) return null;
     processed.add(el);
-    var elementId = el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-message-id'));
+    var elementId = el.getAttribute && (
+      el.getAttribute('data-id') ||
+      el.getAttribute('data-message-id') ||
+      el.id
+    );
     var id = chatId + '_kk_' + (elementId || (Date.now().toString(36) + '_' + (++sequence)));
     var avatarEl = el.querySelector ? el.querySelector('img[alt*="avatar"], img[class*="avatar"]') : null;
 
@@ -243,39 +268,116 @@ export function getKickScraper(chatId: string, chatName: string): string {
     }
   }
 
-  function initialScan() {
-    var items = document.querySelectorAll('[class*="chat-entry"], .chat-entry, [data-chat-entry]');
-    if (!items.length) items = document.querySelectorAll('.message-container, [class*="message"]');
+  function collectFrom(root) {
+    if (!root || root.nodeType !== 1) return [];
+    var items = [];
+    if (root.matches && root.matches(rowSelector)) items.push(root);
+    if (root.querySelectorAll) {
+      root.querySelectorAll(rowSelector).forEach(function(item) { items.push(item); });
+    }
     var msgs = [];
     items.forEach(function(el) { msgs.push(processElement(el)); });
-    sendMessages(msgs);
+    return msgs;
+  }
+
+  function scanDocument() {
+    if (!document.body) return;
+    sendMessages(collectFrom(document.body));
   }
 
   function setupObserver() {
-    var container = document.querySelector('[id*="chatroom"], .chatroom, [class*="chat-list"]');
-    if (!container) return false;
-
+    if (!document.body) return false;
     var observer = new MutationObserver(function(mutations) {
       var msgs = [];
       mutations.forEach(function(mutation) {
         mutation.addedNodes.forEach(function(node) {
-          if (node.nodeType !== 1) return;
-          msgs.push(processElement(node));
+          collectFrom(node).forEach(function(message) { msgs.push(message); });
         });
       });
       sendMessages(msgs);
     });
-    observer.observe(container, { childList: true, subtree: false });
+    observer.observe(document.body, { childList: true, subtree: true });
     return true;
   }
 
-  initialScan();
-  if (!setupObserver()) {
-    var retries = 0;
-    var interval = setInterval(function() {
-      if (setupObserver() || ++retries > 10) clearInterval(interval);
-    }, 1000);
+  function start() {
+    scanDocument();
+    setupObserver();
+    setInterval(scanDocument, 3000);
   }
+
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start, { once: true });
+})();
+true;
+`;
+}
+
+export function getKickSocketInterceptor(chatId: string, chatName: string): string {
+  const serializedChatId = JSON.stringify(chatId);
+  const serializedChatName = JSON.stringify(chatName);
+  return `
+(function() {
+  if (window.__streamchat_kick_socket_init || !window.WebSocket) return true;
+  window.__streamchat_kick_socket_init = true;
+
+  var chatId = ${serializedChatId};
+  var chatName = ${serializedChatName};
+  var NativeWebSocket = window.WebSocket;
+
+  function parseJson(value) {
+    if (typeof value !== 'string') return value;
+    try { return JSON.parse(value); } catch (_) { return null; }
+  }
+
+  function forward(raw) {
+    var envelope = parseJson(raw);
+    if (!envelope || typeof envelope !== 'object') return;
+    var eventName = String(envelope.event || envelope.type || '');
+    if (!/ChatMessage(?:Sent)?Event|chat\.message\.sent/i.test(eventName)) return;
+
+    var payload = parseJson(envelope.data) || envelope.data || envelope;
+    if (payload && payload.message) payload = payload.message;
+    if (!payload || typeof payload !== 'object') return;
+
+    var content = String(payload.content || '').trim();
+    var sender = payload.sender || payload.user || {};
+    var userName = String(sender.username || sender.name || '').trim();
+    if (!content || !userName) return;
+
+    var rawId = payload.id || payload.message_id || (Date.now().toString(36) + '_' + Math.random().toString(36).slice(2));
+    var timestamp = payload.created_at ? new Date(payload.created_at).getTime() : Date.now();
+    if (!Number.isFinite(timestamp)) timestamp = Date.now();
+
+    window.__streamchat_kick_socket_message_received = true;
+    window.ReactNativeWebView.postMessage(JSON.stringify({
+      type: 'chat_messages',
+      messages: [{
+        messageId: chatId + '_kk_' + rawId,
+        platform: 'kick',
+        chatId: chatId,
+        chatName: chatName,
+        userName: userName,
+        userAvatar: sender.profile_picture || sender.profile_pic || null,
+        message: content,
+        timestamp: timestamp
+      }]
+    }));
+  }
+
+  function StreamChatWebSocket(url, protocols) {
+    var socket = protocols === undefined
+      ? new NativeWebSocket(url)
+      : new NativeWebSocket(url, protocols);
+    socket.addEventListener('message', function(event) { forward(event.data); });
+    return socket;
+  }
+
+  StreamChatWebSocket.prototype = NativeWebSocket.prototype;
+  ['CONNECTING', 'OPEN', 'CLOSING', 'CLOSED'].forEach(function(key) {
+    try { Object.defineProperty(StreamChatWebSocket, key, { value: NativeWebSocket[key] }); } catch (_) {}
+  });
+  window.WebSocket = StreamChatWebSocket;
 })();
 true;
 `;
