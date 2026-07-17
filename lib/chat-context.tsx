@@ -1,12 +1,10 @@
-import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, ReactNode } from "react";
+import React, { createContext, useContext, useState, useEffect, useCallback, useMemo, useRef, ReactNode } from "react";
 import {
   ChatConfig,
   AppSettings,
   getChats,
   saveChats,
-  addChat as addChatStorage,
-  updateChat as updateChatStorage,
-  removeChat as removeChatStorage,
+  createChatConfig,
   getSettings,
   saveSettings,
 } from "./storage";
@@ -38,11 +36,56 @@ export function ChatProvider({ children }: { children: ReactNode }) {
     unifiedMode: false,
   });
   const [isLoading, setIsLoading] = useState(true);
+  const chatsRef = useRef<ChatConfig[]>([]);
+  const persistedChatsRef = useRef<ChatConfig[]>([]);
+  const settingsRef = useRef(settings);
+  const persistedSettingsRef = useRef(settings);
+  const chatsWriteQueue = useRef<Promise<void>>(Promise.resolve());
+  const settingsWriteQueue = useRef<Promise<void>>(Promise.resolve());
+
+  const commitChats = useCallback(async (next: ChatConfig[]) => {
+    chatsRef.current = next;
+    setChats(next);
+    const write = chatsWriteQueue.current.catch(() => undefined).then(() => saveChats(next));
+    chatsWriteQueue.current = write;
+    try {
+      await write;
+      persistedChatsRef.current = next;
+    } catch (error) {
+      if (chatsRef.current === next) {
+        chatsRef.current = persistedChatsRef.current;
+        setChats(persistedChatsRef.current);
+      }
+      throw error;
+    }
+  }, []);
+
+  const commitSettings = useCallback(async (next: AppSettings) => {
+    settingsRef.current = next;
+    setSettings(next);
+    const write = settingsWriteQueue.current.catch(() => undefined).then(() => saveSettings(next));
+    settingsWriteQueue.current = write;
+    try {
+      await write;
+      persistedSettingsRef.current = next;
+    } catch (error) {
+      if (settingsRef.current === next) {
+        settingsRef.current = persistedSettingsRef.current;
+        setSettings(persistedSettingsRef.current);
+      }
+      throw error;
+    }
+  }, []);
 
   const loadData = useCallback(async () => {
     setIsLoading(true);
     const [loadedChats, loadedSettings] = await Promise.all([getChats(), getSettings()]);
-    setChats(loadedChats.sort((a, b) => a.order - b.order));
+    const sortedChats = [...loadedChats].sort((a, b) => a.order - b.order);
+    chatsRef.current = sortedChats;
+    persistedChatsRef.current = sortedChats;
+    settingsRef.current = loadedSettings;
+    persistedSettingsRef.current = loadedSettings;
+    setChats(sortedChats);
     setSettings(loadedSettings);
     setIsLoading(false);
   }, []);
@@ -52,71 +95,68 @@ export function ChatProvider({ children }: { children: ReactNode }) {
   }, [loadData]);
 
   const addChat = useCallback(async (chat: Omit<ChatConfig, "id" | "order">) => {
-    const newChat = await addChatStorage(chat);
-    setChats((prev) => [...prev, newChat]);
-  }, []);
+    const newChat = createChatConfig(chat, chatsRef.current.length);
+    await commitChats([...chatsRef.current, newChat]);
+  }, [commitChats]);
 
   const updateChat = useCallback(async (id: string, updates: Partial<ChatConfig>) => {
-    await updateChatStorage(id, updates);
-    setChats((prev) => prev.map((c) => (c.id === id ? { ...c, ...updates } : c)));
-  }, []);
+    const next = chatsRef.current.map((chat) => (
+      chat.id === id ? { ...chat, ...updates, id: chat.id, order: chat.order } : chat
+    ));
+    await commitChats(next);
+  }, [commitChats]);
 
   const removeChat = useCallback(async (id: string) => {
-    await removeChatStorage(id);
-    setChats((prev) => {
-      const filtered = prev.filter((c) => c.id !== id);
-      filtered.forEach((c, i) => (c.order = i));
-      return filtered;
-    });
-  }, []);
+    const next = chatsRef.current
+      .filter((chat) => chat.id !== id)
+      .map((chat, order) => ({ ...chat, order }));
+    await commitChats(next);
+  }, [commitChats]);
 
   const toggleChat = useCallback(
     async (id: string) => {
-      const chat = chats.find((c) => c.id === id);
+      const chat = chatsRef.current.find((candidate) => candidate.id === id);
       if (chat) {
-        await updateChatStorage(id, { enabled: !chat.enabled });
-        setChats((prev) => prev.map((c) => (c.id === id ? { ...c, enabled: !c.enabled } : c)));
+        await updateChat(id, { enabled: !chat.enabled });
       }
     },
-    [chats]
+    [updateChat]
   );
 
   const togglePin = useCallback(
     async (id: string) => {
-      const chat = chats.find((c) => c.id === id);
+      const chat = chatsRef.current.find((candidate) => candidate.id === id);
       if (chat) {
-        await updateChatStorage(id, { pinned: !chat.pinned });
-        setChats((prev) => prev.map((c) => (c.id === id ? { ...c, pinned: !c.pinned } : c)));
+        await updateChat(id, { pinned: !chat.pinned });
       }
     },
-    [chats]
+    [updateChat]
   );
 
   const moveChat = useCallback(
     async (fromIndex: number, toIndex: number) => {
-      setChats((prev) => {
-        const updated = [...prev];
-        const [moved] = updated.splice(fromIndex, 1);
-        updated.splice(toIndex, 0, moved);
-        updated.forEach((c, i) => (c.order = i));
-        saveChats(updated);
-        return updated;
-      });
+      const current = chatsRef.current;
+      if (fromIndex < 0 || fromIndex >= current.length || toIndex < 0 || toIndex >= current.length || fromIndex === toIndex) {
+        return;
+      }
+      const reordered = [...current];
+      const [moved] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, moved);
+      await commitChats(reordered.map((chat, order) => ({ ...chat, order })));
     },
-    []
+    [commitChats]
   );
 
   const updateSettings = useCallback(async (updates: Partial<AppSettings>) => {
-    setSettings((prev) => {
-      const newSettings = { ...prev, ...updates };
-      saveSettings(newSettings);
-      return newSettings;
-    });
-  }, []);
+    await commitSettings({ ...settingsRef.current, ...updates });
+  }, [commitSettings]);
 
   const refreshChats = useCallback(async () => {
     const loaded = await getChats();
-    setChats(loaded.sort((a, b) => a.order - b.order));
+    const sorted = [...loaded].sort((a, b) => a.order - b.order);
+    chatsRef.current = sorted;
+    persistedChatsRef.current = sorted;
+    setChats(sorted);
   }, []);
 
   const activeChats = useMemo(

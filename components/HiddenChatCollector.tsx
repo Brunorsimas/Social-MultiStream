@@ -4,7 +4,8 @@ import { WebView } from "react-native-webview";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getScraperForPlatform } from "@/lib/chat-scrapers";
 import { globalAggregator, UnifiedChatMessage } from "@/lib/message-aggregator";
-import { getApiUrl } from "@/lib/query-client";
+import { getApiUrl } from "@/lib/api-url";
+import { getKickChannelName } from "@/lib/chat-url";
 
 interface HiddenChatCollectorProps {
   chat: ChatConfig;
@@ -15,16 +16,26 @@ function useKickSSE(chat: ChatConfig) {
   useEffect(() => {
     if (Platform.OS !== "web" || chat.platform !== "kick") return;
 
-    const channelMatch = chat.url.match(/kick\.com\/(\w+)/);
-    const channel = channelMatch?.[1];
+    const channel = getKickChannelName(chat.url);
     if (!channel) return;
 
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let active = true;
 
-    const connect = () => {
+    const scheduleReconnect = (delay: number) => {
       if (!active) return;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(connect, delay);
+    };
+
+    function connect() {
+      if (!active) return;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      es?.close();
       try {
         const base = getApiUrl().replace(/\/$/, "");
         es = new EventSource(`${base}/api/kick/chat/${channel}`);
@@ -35,19 +46,21 @@ function useKickSSE(chat: ChatConfig) {
             if (data.type === "message" && data.message) {
               globalAggregator.addMessage({
                 messageId: `${chat.id}_kk_${data.messageId}`,
-                platform: "kick" as any,
+                platform: "kick",
                 chatId: chat.id,
                 chatName: chat.name,
                 userName: data.userName || "Unknown",
-                userAvatar: null,
+                userAvatar: typeof data.userAvatar === "string" ? data.userAvatar : null,
                 message: String(data.message),
                 timestamp: data.timestamp || Date.now(),
               });
             } else if (data.type === "disconnected") {
               es?.close();
               if (active) {
-                retryTimer = setTimeout(connect, 3000);
+                scheduleReconnect(3000);
               }
+            } else if (data.type === "error") {
+              es?.close();
             }
           } catch {}
         };
@@ -55,11 +68,13 @@ function useKickSSE(chat: ChatConfig) {
         es.onerror = () => {
           es?.close();
           if (active) {
-            retryTimer = setTimeout(connect, 5000);
+            scheduleReconnect(5000);
           }
         };
-      } catch {}
-    };
+      } catch {
+        scheduleReconnect(5000);
+      }
+    }
 
     connect();
 
@@ -119,18 +134,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
   );
 
   if (Platform.OS === "web") {
-    if (chat.platform === "kick") {
-      return <View style={styles.hiddenContainer} />;
-    }
-    return (
-      <View style={styles.hiddenContainer}>
-        <iframe
-          src={embedUrl}
-          style={{ width: 1, height: 1, border: "none", opacity: 0 } as any}
-          allow="autoplay"
-        />
-      </View>
-    );
+    return <View style={styles.hiddenContainer} />;
   }
 
   return (
@@ -146,8 +150,8 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={false}
-        originWhitelist={["*"]}
-        mixedContentMode="always"
+        originWhitelist={["http://*", "https://*"]}
+        mixedContentMode="compatibility"
       />
     </View>
   );

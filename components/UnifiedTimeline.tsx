@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import {
   View,
   Text,
@@ -6,6 +6,7 @@ import {
   Pressable,
   StyleSheet,
   Platform,
+  Image,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -76,16 +77,21 @@ function MessageItem({ item, fontSize }: MessageItemProps) {
 
   return (
     <View style={styles.messageRow}>
-      <AvatarPlaceholder name={item.userName} color={color} />
+      {item.userAvatar ? (
+        <Image source={{ uri: item.userAvatar }} style={styles.avatar} />
+      ) : (
+        <AvatarPlaceholder name={item.userName} color={color} />
+      )}
       <View style={styles.messageBody}>
         <View style={styles.messageTopRow}>
           <PlatformPill platform={item.platform} />
           <Text style={[styles.userName, { color }]} numberOfLines={1}>
             {item.userName}
           </Text>
+          <Text style={styles.chatName} numberOfLines={1}>({item.chatName})</Text>
           <Text style={styles.messageTime}>{timeStr}</Text>
         </View>
-        <Text style={[styles.messageText, { fontSize }]}>{item.message}</Text>
+        <Text style={[styles.messageText, { fontSize, lineHeight: Math.round(fontSize * 1.4) }]}>{item.message}</Text>
       </View>
     </View>
   );
@@ -98,13 +104,21 @@ export default function UnifiedTimeline({
   onToggleFullscreen,
   isFullscreen = false,
 }: UnifiedTimelineProps) {
-  const [messages, setMessages] = useState<UnifiedChatMessage[]>(
-    globalAggregator.getMessages()
-  );
+  const [messages, setMessages] = useState<UnifiedChatMessage[]>([]);
   const [paused, setPaused] = useState(false);
   const [hasNew, setHasNew] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const pausedRef = useRef(false);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const activeChatIds = useMemo(() => new Set(chats.map((chat) => chat.id)), [chats]);
+
+  const scrollToEnd = useCallback((animated = true) => {
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null;
+      flatListRef.current?.scrollToEnd({ animated });
+    }, 80);
+  }, []);
 
   useEffect(() => {
     pausedRef.current = paused;
@@ -112,39 +126,42 @@ export default function UnifiedTimeline({
 
   useEffect(() => {
     const unsub = globalAggregator.subscribe((msgs) => {
-      setMessages(msgs);
-      if (pausedRef.current) {
+      const activeMessages = msgs.filter((message) => activeChatIds.has(message.chatId));
+      setMessages(activeMessages);
+      if (pausedRef.current && activeMessages.length > 0) {
         setHasNew(true);
       }
     });
     return unsub;
-  }, []);
+  }, [activeChatIds]);
 
   useEffect(() => {
     if (!paused && messages.length > 0) {
-      setTimeout(() => {
-        flatListRef.current?.scrollToEnd({ animated: true });
-      }, 80);
+      scrollToEnd();
     }
-  }, [messages.length, paused]);
+  }, [messages.length, paused, scrollToEnd]);
+
+  useEffect(() => () => {
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+  }, []);
 
 
   const togglePause = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-    setPaused((p) => {
-      if (p) {
-        setHasNew(false);
-        setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
-      }
-      return !p;
-    });
+    if (paused) {
+      setPaused(false);
+      setHasNew(false);
+      scrollToEnd();
+    } else {
+      setPaused(true);
+    }
   };
 
   const resumeAndScroll = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setPaused(false);
     setHasNew(false);
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 80);
+    scrollToEnd();
   };
 
   const clearMessages = () => {
@@ -166,6 +183,9 @@ export default function UnifiedTimeline({
   );
 
   const totalConnected = chats.length;
+  const collectibleCount = Platform.OS === "web"
+    ? chats.filter((chat) => chat.platform === "kick").length
+    : totalConnected;
 
   return (
     <View style={styles.container}>
@@ -177,7 +197,7 @@ export default function UnifiedTimeline({
         <View style={styles.liveDot} />
         <Text style={styles.liveText}>Live</Text>
         <Text style={styles.connectedText}>
-          {" "}• {totalConnected} Connected
+          {" "}• {collectibleCount} {collectibleCount === 1 ? "Source" : "Sources"}
         </Text>
       </View>
 
@@ -186,8 +206,9 @@ export default function UnifiedTimeline({
           <Ionicons name="radio-outline" size={40} color={Colors.dark.textMuted} />
           <Text style={styles.emptyTitle}>Waiting for messages...</Text>
           <Text style={styles.emptyDesc}>
-            Messages from {chats.length} active chat
-            {chats.length !== 1 ? "s" : ""} will appear here in real time.
+            {Platform.OS === "web" && collectibleCount < chats.length
+              ? "On the web, unified collection is available for Kick. Open the Android app to collect embedded chats from other platforms."
+              : `Messages from ${chats.length} active chat${chats.length !== 1 ? "s" : ""} will appear here in real time.`}
           </Text>
         </View>
       ) : (
@@ -203,6 +224,8 @@ export default function UnifiedTimeline({
           maxToRenderPerBatch={20}
           windowSize={15}
           removeClippedSubviews={Platform.OS !== "web"}
+          onScrollBeginDrag={() => setPaused(true)}
+          scrollEventThrottle={100}
         />
       )}
 
@@ -347,11 +370,18 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_600SemiBold",
     flexShrink: 1,
   },
+  chatName: {
+    maxWidth: 120,
+    flexShrink: 1,
+    fontSize: 11,
+    fontFamily: "Inter_400Regular",
+    color: Colors.dark.textMuted,
+  },
   messageTime: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
     color: Colors.dark.textMuted,
-    marginLeft: "auto" as any,
+    marginLeft: "auto",
     flexShrink: 0,
   },
   messageText: {

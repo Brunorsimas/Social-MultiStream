@@ -1,4 +1,7 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
+import { detectPlatform, getChatEmbedUrl, normalizeChatUrl } from "./chat-url";
+
+export { detectPlatform, getChatEmbedUrl, normalizeChatUrl } from "./chat-url";
 
 export interface ChatConfig {
   id: string;
@@ -21,7 +24,7 @@ export interface AppSettings {
 const CHATS_KEY = "@streamchat_chats";
 const SETTINGS_KEY = "@streamchat_settings";
 
-const defaultSettings: AppSettings = {
+export const defaultSettings: AppSettings = {
   layout: "columns",
   fontSize: 14,
   streamerMode: false,
@@ -30,54 +33,87 @@ const defaultSettings: AppSettings = {
 };
 
 function generateId(): string {
-  return Date.now().toString() + Math.random().toString(36).substr(2, 9);
+  return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 11)}`;
 }
 
-export function detectPlatform(url: string): string {
-  const lower = url.toLowerCase();
-  if (lower.includes("twitch.tv") || lower.includes("twitch")) return "twitch";
-  if (lower.includes("youtube.com") || lower.includes("youtu.be")) return "youtube";
-  if (lower.includes("kick.com")) return "kick";
-  if (lower.includes("facebook.com") || lower.includes("fb.")) return "facebook";
-  if (lower.includes("tiktok.com")) return "tiktok";
-  return "other";
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
 }
 
-export function getChatEmbedUrl(url: string): string {
-  const platform = detectPlatform(url);
+function sanitizeChats(value: unknown): ChatConfig[] {
+  if (!Array.isArray(value)) return [];
 
-  if (platform === "twitch") {
-    const match = url.match(/twitch\.tv\/(?:popout\/)?(\w+)(?:\/chat)?/);
-    if (match) {
-      const channel = match[1];
-      return `https://www.twitch.tv/popout/${channel}/chat?darkpopout`;
-    }
-  }
+  const seenIds = new Set<string>();
+  return value.flatMap((candidate, index) => {
+    if (!isRecord(candidate)) return [];
+    const normalizedUrl = normalizeChatUrl(typeof candidate.url === "string" ? candidate.url : "");
+    if (!normalizedUrl) return [];
 
-  if (platform === "youtube") {
-    const liveMatch = url.match(/(?:youtube\.com\/live\/|youtu\.be\/)([^?&/]+)/);
-    const watchMatch = url.match(/(?:youtube\.com\/watch\?v=)([^&]+)/);
-    const videoId = liveMatch?.[1] || watchMatch?.[1];
-    if (videoId) {
-      return `https://www.youtube.com/live_chat?v=${videoId}&embed_domain=localhost&dark_theme=1`;
-    }
-  }
+    const id = typeof candidate.id === "string" && candidate.id.trim() ? candidate.id : generateId();
+    if (seenIds.has(id)) return [];
+    seenIds.add(id);
 
-  if (platform === "kick") {
-    const match = url.match(/kick\.com\/(\w+)/);
-    if (match) {
-      return `https://kick.com/${match[1]}/chatroom`;
-    }
-  }
+    const name = typeof candidate.name === "string" && candidate.name.trim()
+      ? candidate.name.trim()
+      : `Chat ${index + 1}`;
+    const detectedPlatform = detectPlatform(normalizedUrl);
 
-  return url;
+    return [{
+      id,
+      name,
+      url: normalizedUrl,
+      platform: typeof candidate.platform === "string" && candidate.platform.trim()
+        ? candidate.platform.toLowerCase()
+        : detectedPlatform,
+      enabled: candidate.enabled !== false,
+      pinned: candidate.pinned === true,
+      order: Number.isFinite(candidate.order) ? Number(candidate.order) : index,
+    }];
+  })
+    .sort((a, b) => a.order - b.order)
+    .map((chat, order) => ({ ...chat, order }));
+}
+
+function sanitizeSettings(value: unknown): AppSettings {
+  if (!isRecord(value)) return { ...defaultSettings };
+  const validLayouts: AppSettings["layout"][] = ["columns", "grid", "list", "merged"];
+  const layout = validLayouts.includes(value.layout as AppSettings["layout"])
+    ? value.layout as AppSettings["layout"]
+    : defaultSettings.layout;
+  const fontSize = typeof value.fontSize === "number" && Number.isFinite(value.fontSize)
+    ? Math.max(10, Math.min(24, value.fontSize))
+    : defaultSettings.fontSize;
+
+  return {
+    layout,
+    fontSize,
+    streamerMode: typeof value.streamerMode === "boolean" ? value.streamerMode : defaultSettings.streamerMode,
+    keepScreenOn: typeof value.keepScreenOn === "boolean" ? value.keepScreenOn : defaultSettings.keepScreenOn,
+    unifiedMode: typeof value.unifiedMode === "boolean" ? value.unifiedMode : defaultSettings.unifiedMode,
+  };
+}
+
+export function createChatConfig(
+  chat: Omit<ChatConfig, "id" | "order">,
+  order: number,
+): ChatConfig {
+  const normalizedUrl = normalizeChatUrl(chat.url);
+  if (!normalizedUrl) throw new Error("Invalid chat URL");
+  return {
+    ...chat,
+    id: generateId(),
+    name: chat.name.trim(),
+    url: normalizedUrl,
+    platform: chat.platform || detectPlatform(normalizedUrl),
+    order,
+  };
 }
 
 export async function getChats(): Promise<ChatConfig[]> {
   try {
     const data = await AsyncStorage.getItem(CHATS_KEY);
     if (data) {
-      return JSON.parse(data);
+      return sanitizeChats(JSON.parse(data));
     }
     return [];
   } catch {
@@ -86,16 +122,12 @@ export async function getChats(): Promise<ChatConfig[]> {
 }
 
 export async function saveChats(chats: ChatConfig[]): Promise<void> {
-  await AsyncStorage.setItem(CHATS_KEY, JSON.stringify(chats));
+  await AsyncStorage.setItem(CHATS_KEY, JSON.stringify(sanitizeChats(chats)));
 }
 
 export async function addChat(chat: Omit<ChatConfig, "id" | "order">): Promise<ChatConfig> {
   const chats = await getChats();
-  const newChat: ChatConfig = {
-    ...chat,
-    id: generateId(),
-    order: chats.length,
-  };
+  const newChat = createChatConfig(chat, chats.length);
   chats.push(newChat);
   await saveChats(chats);
   return newChat;
@@ -119,13 +151,14 @@ export async function removeChat(id: string): Promise<void> {
 
 export async function reorderChats(orderedIds: string[]): Promise<void> {
   const chats = await getChats();
-  const ordered = orderedIds
-    .map((id, i) => {
-      const chat = chats.find((c) => c.id === id);
-      if (chat) return { ...chat, order: i };
-      return null;
-    })
-    .filter(Boolean) as ChatConfig[];
+  const byId = new Map(chats.map((chat) => [chat.id, chat]));
+  const requested = orderedIds.flatMap((id) => {
+    const chat = byId.get(id);
+    if (!chat) return [];
+    byId.delete(id);
+    return [chat];
+  });
+  const ordered = [...requested, ...byId.values()].map((chat, order) => ({ ...chat, order }));
   await saveChats(ordered);
 }
 
@@ -133,14 +166,14 @@ export async function getSettings(): Promise<AppSettings> {
   try {
     const data = await AsyncStorage.getItem(SETTINGS_KEY);
     if (data) {
-      return { ...defaultSettings, ...JSON.parse(data) };
+      return sanitizeSettings(JSON.parse(data));
     }
-    return defaultSettings;
+    return { ...defaultSettings };
   } catch {
-    return defaultSettings;
+    return { ...defaultSettings };
   }
 }
 
 export async function saveSettings(settings: AppSettings): Promise<void> {
-  await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(settings));
+  await AsyncStorage.setItem(SETTINGS_KEY, JSON.stringify(sanitizeSettings(settings)));
 }

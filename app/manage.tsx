@@ -15,6 +15,14 @@ export default function ManageScreen() {
   const webTopInset = Platform.OS === "web" ? 67 : 0;
   const webBottomInset = Platform.OS === "web" ? 34 : 0;
 
+  const runAction = async (action: () => Promise<void>) => {
+    try {
+      await action();
+    } catch {
+      Alert.alert("Could Not Save", "The change could not be persisted. Please try again.");
+    }
+  };
+
   const handleDelete = (chat: ChatConfig) => {
     Alert.alert(
       "Remove Chat",
@@ -26,7 +34,7 @@ export default function ManageScreen() {
           style: "destructive",
           onPress: () => {
             Haptics.notificationAsync(Haptics.NotificationFeedbackType.Warning);
-            removeChat(chat.id);
+            void runAction(() => removeChat(chat.id));
           },
         },
       ]
@@ -36,12 +44,13 @@ export default function ManageScreen() {
   const renderItem = ({ item, index }: { item: ChatConfig; index: number }) => (
     <ChatCard
       chat={item}
-      onToggle={() => toggleChat(item.id)}
+      onToggle={() => { void runAction(() => toggleChat(item.id)); }}
+      onOpen={() => router.push({ pathname: "/single-chat", params: { id: item.id } } as any)}
       onEdit={() => router.push({ pathname: "/add-chat", params: { editId: item.id } } as any)}
       onDelete={() => handleDelete(item)}
-      onPin={() => togglePin(item.id)}
-      onMoveUp={() => moveChat(index, index - 1)}
-      onMoveDown={() => moveChat(index, index + 1)}
+      onPin={() => { void runAction(() => togglePin(item.id)); }}
+      onMoveUp={() => { void runAction(() => moveChat(index, index - 1)); }}
+      onMoveDown={() => { void runAction(() => moveChat(index, index + 1)); }}
       isFirst={index === 0}
       isLast={index === chats.length - 1}
     />

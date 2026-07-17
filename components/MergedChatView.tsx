@@ -4,7 +4,9 @@ import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import Colors from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
+import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
+import { getCurrentEmbedDomain, getKickChannelName } from "@/lib/chat-url";
 
 interface MergedChatViewProps {
   chats: ChatConfig[];
@@ -78,7 +80,8 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
 
       <View style={styles.chatContainer}>
         {chats.map((chat, index) => {
-          const embedUrl = getChatEmbedUrl(chat.url);
+          const embedUrl = getChatEmbedUrl(chat.url, Platform.OS === "web" ? getCurrentEmbedDomain() : undefined);
+          const kickChannel = chat.platform === "kick" ? getKickChannelName(chat.url) : null;
           const isVisible = index === safeIndex;
 
           if (Platform.OS === "web") {
@@ -87,11 +90,15 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 key={chat.id}
                 style={[styles.webViewWrapper, { display: isVisible ? "flex" : "none" } as any]}
               >
-                <iframe
-                  src={embedUrl}
-                  style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
-                  allow="autoplay"
-                />
+                {kickChannel ? (
+                  <KickWebChat channel={kickChannel} fontSize={fontSize} />
+                ) : (
+                  <iframe
+                    src={embedUrl}
+                    style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
+                    allow="autoplay"
+                  />
+                )}
               </View>
             );
           }
@@ -122,8 +129,8 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 allowsInlineMediaPlayback
                 mediaPlaybackRequiresUserAction={false}
                 startInLoadingState={false}
-                originWhitelist={["*"]}
-                mixedContentMode="always"
+                originWhitelist={["http://*", "https://*"]}
+                mixedContentMode="compatibility"
               />
             </View>
           );

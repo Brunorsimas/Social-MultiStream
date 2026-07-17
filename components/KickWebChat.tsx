@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from "react";
 import { View, Text, FlatList, StyleSheet, ActivityIndicator } from "react-native";
-import { getApiUrl } from "@/lib/query-client";
+import { getApiUrl } from "@/lib/api-url";
 import Colors from "@/constants/colors";
 
 interface KickMessage {
@@ -39,8 +39,19 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
     let active = true;
 
-    const connect = () => {
+    const scheduleReconnect = (delay: number) => {
       if (!active) return;
+      if (retryTimer) clearTimeout(retryTimer);
+      retryTimer = setTimeout(connect, delay);
+    };
+
+    function connect() {
+      if (!active) return;
+      if (retryTimer) {
+        clearTimeout(retryTimer);
+        retryTimer = null;
+      }
+      es?.close();
       setStatus("connecting");
       try {
         const base = getApiUrl().replace(/\/$/, "");
@@ -59,11 +70,12 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
                 timestamp: data.timestamp || Date.now(),
               });
             } else if (data.type === "error") {
+              es?.close();
               setStatus("error");
               setErrorMsg(data.message || "Erro ao conectar ao chat");
             } else if (data.type === "disconnected") {
               es?.close();
-              if (active) retryTimer = setTimeout(connect, 3000);
+              scheduleReconnect(3000);
             }
           } catch {}
         };
@@ -72,13 +84,13 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
           es?.close();
           if (active) {
             setStatus("connecting");
-            retryTimer = setTimeout(connect, 5000);
+            scheduleReconnect(5000);
           }
         };
       } catch {
-        if (active) retryTimer = setTimeout(connect, 5000);
+        scheduleReconnect(5000);
       }
-    };
+    }
 
     connect();
 

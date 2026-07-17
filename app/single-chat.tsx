@@ -1,5 +1,5 @@
 import React from "react";
-import { View, Text, Pressable, StyleSheet, Platform } from "react-native";
+import { View, Text, Pressable, StyleSheet, Platform, ActivityIndicator, Alert } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons } from "@expo/vector-icons";
@@ -8,15 +8,29 @@ import Colors from "@/constants/colors";
 import ChatWebView from "@/components/ChatWebView";
 import { useChats } from "@/lib/chat-context";
 
+function KeepAwakeGuard() {
+  useKeepAwake();
+  return null;
+}
+
 export default function SingleChatScreen() {
   const insets = useSafeAreaInsets();
-  const { chats, togglePin } = useChats();
+  const { chats, togglePin, settings, isLoading } = useChats();
   const { id } = useLocalSearchParams<{ id: string }>();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
-  useKeepAwake();
-
   const chat = chats.find((c) => c.id === id);
+
+  if (isLoading) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.errorState}>
+          <ActivityIndicator color={Colors.dark.primary} />
+          <Text style={styles.errorText}>Loading chat...</Text>
+        </View>
+      </View>
+    );
+  }
 
   if (!chat) {
     return (
@@ -38,12 +52,20 @@ export default function SingleChatScreen() {
 
   return (
     <View style={styles.container}>
+      {settings.keepScreenOn && <KeepAwakeGuard />}
       <View style={[styles.header, { paddingTop: insets.top + webTopInset + 12 }]}>
         <Pressable onPress={() => router.back()} hitSlop={12}>
           <Ionicons name="chevron-back" size={24} color={Colors.dark.text} />
         </Pressable>
         <Text style={styles.headerTitle} numberOfLines={1}>{chat.name}</Text>
-        <Pressable onPress={() => togglePin(chat.id)} hitSlop={12}>
+        <Pressable
+          onPress={() => {
+            void togglePin(chat.id).catch(() => {
+              Alert.alert("Could Not Save", "The pinned state could not be persisted.");
+            });
+          }}
+          hitSlop={12}
+        >
           <Ionicons
             name={chat.pinned ? "pin" : "pin-outline"}
             size={22}

@@ -6,6 +6,7 @@ import Colors from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
+import { getCurrentEmbedDomain, getKickChannelName } from "@/lib/chat-url";
 
 interface ChatWebViewProps {
   chat: ChatConfig;
@@ -19,8 +20,9 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
+  const [webReloadKey, setWebReloadKey] = useState(0);
 
-  const embedUrl = getChatEmbedUrl(chat.url);
+  const embedUrl = getChatEmbedUrl(chat.url, Platform.OS === "web" ? getCurrentEmbedDomain() : undefined);
 
   const injectedCSS = `
     (function() {
@@ -32,9 +34,7 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
   `;
 
   if (Platform.OS === "web") {
-    const kickChannel = chat.platform === "kick"
-      ? (chat.url.match(/kick\.com\/(\w+)/)?.[1] ?? "")
-      : "";
+    const kickChannel = chat.platform === "kick" ? (getKickChannelName(chat.url) ?? "") : "";
 
     return (
       <View style={[styles.container, compact && styles.compact]}>
@@ -42,14 +42,24 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
           <View style={styles.header}>
             <PlatformBadge platform={chat.platform} size={12} />
             <Text style={styles.headerText} numberOfLines={1}>{chat.name}</Text>
-            {chat.pinned && <Ionicons name="pin" size={12} color={Colors.dark.warning} />}
+            {onPin ? (
+              <Pressable onPress={onPin} hitSlop={8}>
+                <Ionicons name={chat.pinned ? "pin" : "pin-outline"} size={14} color={chat.pinned ? Colors.dark.warning : Colors.dark.textMuted} />
+              </Pressable>
+            ) : chat.pinned ? (
+              <Ionicons name="pin" size={12} color={Colors.dark.warning} />
+            ) : null}
+            <Pressable onPress={() => setWebReloadKey((key) => key + 1)} hitSlop={8}>
+              <Ionicons name="refresh" size={14} color={Colors.dark.textMuted} />
+            </Pressable>
           </View>
         )}
         <View style={styles.webContainer}>
           {chat.platform === "kick" && kickChannel ? (
-            <KickWebChat channel={kickChannel} fontSize={fontSize} />
+            <KickWebChat key={webReloadKey} channel={kickChannel} fontSize={fontSize} />
           ) : (
-            <iframe
+              <iframe
+                key={webReloadKey}
               src={embedUrl}
               style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
               allow="autoplay"
@@ -66,12 +76,13 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
         <View style={styles.header}>
           <PlatformBadge platform={chat.platform} size={12} />
           <Text style={styles.headerText} numberOfLines={1}>{chat.name}</Text>
-          {chat.pinned && <Ionicons name="pin" size={12} color={Colors.dark.warning} />}
-          {onPin && (
+          {onPin ? (
             <Pressable onPress={onPin} hitSlop={8}>
-              <Ionicons name={chat.pinned ? "pin" : "pin-outline"} size={14} color={Colors.dark.textMuted} />
+              <Ionicons name={chat.pinned ? "pin" : "pin-outline"} size={14} color={chat.pinned ? Colors.dark.warning : Colors.dark.textMuted} />
             </Pressable>
-          )}
+          ) : chat.pinned ? (
+            <Ionicons name="pin" size={12} color={Colors.dark.warning} />
+          ) : null}
           <Pressable onPress={() => webViewRef.current?.reload()} hitSlop={8}>
             <Ionicons name="refresh" size={14} color={Colors.dark.textMuted} />
           </Pressable>
@@ -115,8 +126,8 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
             startInLoadingState={false}
-            originWhitelist={["*"]}
-            mixedContentMode="always"
+            originWhitelist={["http://*", "https://*"]}
+            mixedContentMode="compatibility"
           />
         )}
       </View>

@@ -11,9 +11,17 @@ export interface UnifiedChatMessage {
   timestamp: number;
 }
 
-const MAX_MESSAGES = 500;
+export const MAX_MESSAGES = 500;
 const MAX_SEEN_IDS = 5000;
 const NOTIFY_THROTTLE_MS = 150;
+const VALID_PLATFORMS = new Set<ChatPlatform>([
+  "youtube",
+  "twitch",
+  "kick",
+  "facebook",
+  "tiktok",
+  "unknown",
+]);
 
 export class MessageAggregator {
   private messages: UnifiedChatMessage[] = [];
@@ -22,11 +30,13 @@ export class MessageAggregator {
   private notifyTimer: ReturnType<typeof setTimeout> | null = null;
 
   addMessage(msg: UnifiedChatMessage): void {
-    if (!msg.message || !msg.message.trim()) return;
-    if (this.seenIds.has(msg.messageId)) return;
+    const normalized = this.normalizeMessage(msg);
+    if (!normalized) return;
+    const dedupeKey = this.getDedupeKey(normalized);
+    if (this.seenIds.has(dedupeKey)) return;
 
-    this.seenIds.add(msg.messageId);
-    this.messages.push(msg);
+    this.seenIds.add(dedupeKey);
+    this.messages.push(normalized);
     this.messages.sort((a, b) => a.timestamp - b.timestamp);
 
     if (this.messages.length > MAX_MESSAGES) {
@@ -40,10 +50,12 @@ export class MessageAggregator {
   addMessages(msgs: UnifiedChatMessage[]): void {
     let changed = false;
     for (const msg of msgs) {
-      if (!msg.message || !msg.message.trim()) continue;
-      if (this.seenIds.has(msg.messageId)) continue;
-      this.seenIds.add(msg.messageId);
-      this.messages.push(msg);
+      const normalized = this.normalizeMessage(msg);
+      if (!normalized) continue;
+      const dedupeKey = this.getDedupeKey(normalized);
+      if (this.seenIds.has(dedupeKey)) continue;
+      this.seenIds.add(dedupeKey);
+      this.messages.push(normalized);
       changed = true;
     }
 
@@ -75,8 +87,33 @@ export class MessageAggregator {
 
   subscribe(listener: (messages: UnifiedChatMessage[]) => void): () => void {
     this.listeners.add(listener);
+    listener(this.getMessages());
     return () => {
       this.listeners.delete(listener);
+    };
+  }
+
+  private getDedupeKey(msg: UnifiedChatMessage): string {
+    return `${msg.chatId}\u0000${msg.messageId}`;
+  }
+
+  private normalizeMessage(msg: UnifiedChatMessage): UnifiedChatMessage | null {
+    const messageId = String(msg.messageId ?? "").trim();
+    const chatId = String(msg.chatId ?? "").trim();
+    const message = String(msg.message ?? "").trim();
+    if (!messageId || !chatId || !message) return null;
+
+    const timestamp = Number(msg.timestamp);
+    return {
+      ...msg,
+      messageId,
+      chatId,
+      chatName: String(msg.chatName ?? "Chat").trim() || "Chat",
+      userName: String(msg.userName ?? "Unknown").trim() || "Unknown",
+      userAvatar: typeof msg.userAvatar === "string" && msg.userAvatar.trim() ? msg.userAvatar : null,
+      message,
+      platform: VALID_PLATFORMS.has(msg.platform) ? msg.platform : "unknown",
+      timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),
     };
   }
 
@@ -97,7 +134,13 @@ export class MessageAggregator {
 
   private notify(): void {
     const snapshot = this.getMessages();
-    this.listeners.forEach((fn) => fn(snapshot));
+    this.listeners.forEach((listener) => {
+      try {
+        listener(snapshot);
+      } catch {
+        // A broken consumer must not prevent other subscribers from updating.
+      }
+    });
   }
 }
 

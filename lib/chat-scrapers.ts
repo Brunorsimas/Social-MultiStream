@@ -1,10 +1,15 @@
 export function getTwitchScraper(chatId: string, chatName: string): string {
+  const serializedChatId = JSON.stringify(chatId);
+  const serializedChatName = JSON.stringify(chatName);
   return `
 (function() {
   if (window.__streamchat_init) return true;
   window.__streamchat_init = true;
 
-  var sent = new Set();
+  var chatId = ${serializedChatId};
+  var chatName = ${serializedChatName};
+  var processed = new WeakSet();
+  var sequence = 0;
 
   function processElement(el) {
     var userEl = el.querySelector
@@ -30,17 +35,19 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
 
     if (!userName || !message) return null;
 
-    var id = '${chatId}_tw_' + userName + '_' + message.substring(0, 40);
-    if (sent.has(id)) return null;
-    sent.add(id);
+    if (processed.has(el)) return null;
+    processed.add(el);
+    var elementId = el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-message-id'));
+    var id = chatId + '_tw_' + (elementId || (Date.now().toString(36) + '_' + (++sequence)));
+    var avatarEl = el.querySelector ? el.querySelector('img[alt*="avatar"], img[class*="avatar"]') : null;
 
     return {
       messageId: id,
       platform: 'twitch',
-      chatId: '${chatId}',
-      chatName: '${chatName}',
+      chatId: chatId,
+      chatName: chatName,
       userName: userName,
-      userAvatar: null,
+      userAvatar: avatarEl ? (avatarEl.src || avatarEl.getAttribute('src')) : null,
       message: message,
       timestamp: Date.now()
     };
@@ -92,12 +99,17 @@ true;
 }
 
 export function getYouTubeScraper(chatId: string, chatName: string): string {
+  const serializedChatId = JSON.stringify(chatId);
+  const serializedChatName = JSON.stringify(chatName);
   return `
 (function() {
   if (window.__streamchat_init) return true;
   window.__streamchat_init = true;
 
-  var sent = new Set();
+  var chatId = ${serializedChatId};
+  var chatName = ${serializedChatName};
+  var processed = new WeakSet();
+  var sequence = 0;
 
   function processElement(el) {
     var userEl = el.querySelector ? el.querySelector('#author-name') : null;
@@ -108,17 +120,19 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
     var message = msgEl.textContent.trim();
     if (!userName || !message) return null;
 
-    var id = '${chatId}_yt_' + userName + '_' + message.substring(0, 40);
-    if (sent.has(id)) return null;
-    sent.add(id);
+    if (processed.has(el)) return null;
+    processed.add(el);
+    var elementId = el.getAttribute && el.getAttribute('id');
+    var id = chatId + '_yt_' + (elementId || (Date.now().toString(36) + '_' + (++sequence)));
+    var avatarEl = el.querySelector ? el.querySelector('#author-photo img') : null;
 
     return {
       messageId: id,
       platform: 'youtube',
-      chatId: '${chatId}',
-      chatName: '${chatName}',
+      chatId: chatId,
+      chatName: chatName,
       userName: userName,
-      userAvatar: null,
+      userAvatar: avatarEl ? (avatarEl.src || avatarEl.getAttribute('src')) : null,
       message: message,
       timestamp: Date.now()
     };
@@ -169,12 +183,17 @@ true;
 }
 
 export function getKickScraper(chatId: string, chatName: string): string {
+  const serializedChatId = JSON.stringify(chatId);
+  const serializedChatName = JSON.stringify(chatName);
   return `
 (function() {
   if (window.__streamchat_init) return true;
   window.__streamchat_init = true;
 
-  var sent = new Set();
+  var chatId = ${serializedChatId};
+  var chatName = ${serializedChatName};
+  var processed = new WeakSet();
+  var sequence = 0;
 
   function processElement(el) {
     var userEl = el.querySelector
@@ -199,17 +218,19 @@ export function getKickScraper(chatId: string, chatName: string): string {
 
     if (!userName || !message) return null;
 
-    var id = '${chatId}_kk_' + userName + '_' + message.substring(0, 40);
-    if (sent.has(id)) return null;
-    sent.add(id);
+    if (processed.has(el)) return null;
+    processed.add(el);
+    var elementId = el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-message-id'));
+    var id = chatId + '_kk_' + (elementId || (Date.now().toString(36) + '_' + (++sequence)));
+    var avatarEl = el.querySelector ? el.querySelector('img[alt*="avatar"], img[class*="avatar"]') : null;
 
     return {
       messageId: id,
       platform: 'kick',
-      chatId: '${chatId}',
-      chatName: '${chatName}',
+      chatId: chatId,
+      chatName: chatName,
       userName: userName,
-      userAvatar: null,
+      userAvatar: avatarEl ? (avatarEl.src || avatarEl.getAttribute('src')) : null,
       message: message,
       timestamp: Date.now()
     };
@@ -261,12 +282,19 @@ true;
 }
 
 export function getGenericScraper(chatId: string, chatName: string, platform: string): string {
+  const serializedChatId = JSON.stringify(chatId);
+  const serializedChatName = JSON.stringify(chatName);
+  const serializedPlatform = JSON.stringify(platform);
   return `
 (function() {
   if (window.__streamchat_init) return true;
   window.__streamchat_init = true;
 
-  var sent = new Set();
+  var chatId = ${serializedChatId};
+  var chatName = ${serializedChatName};
+  var platform = ${serializedPlatform};
+  var processed = new WeakSet();
+  var sequence = 0;
 
   function processElement(el) {
     if (!el.querySelector) return null;
@@ -274,20 +302,21 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
     var text = el.textContent ? el.textContent.trim() : '';
     if (text.length < 3 || text.length > 500) return null;
 
-    var id = '${chatId}_gen_' + text.substring(0, 50);
-    if (sent.has(id)) return null;
-    sent.add(id);
-
     var parts = text.split(':');
     var userName = parts.length >= 2 ? parts[0].trim().substring(0, 30) : 'User';
     var message = parts.length >= 2 ? parts.slice(1).join(':').trim() : text;
     if (!message) return null;
 
+    if (processed.has(el)) return null;
+    processed.add(el);
+    var elementId = el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-message-id'));
+    var id = chatId + '_gen_' + (elementId || (Date.now().toString(36) + '_' + (++sequence)));
+
     return {
       messageId: id,
-      platform: '${platform}',
-      chatId: '${chatId}',
-      chatName: '${chatName}',
+      platform: platform,
+      chatId: chatId,
+      chatName: chatName,
       userName: userName,
       userAvatar: null,
       message: message,

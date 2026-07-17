@@ -8,6 +8,7 @@ import {
   ScrollView,
   Platform,
   Alert,
+  ActivityIndicator,
 } from "react-native";
 import { router, useLocalSearchParams } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -16,13 +17,14 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import PlatformBadge from "@/components/PlatformBadge";
 import { useChats } from "@/lib/chat-context";
-import { detectPlatform } from "@/lib/storage";
+import { detectPlatform, normalizeChatUrl } from "@/lib/storage";
+import { isResolvableChatUrl } from "@/lib/chat-url";
 
 const PLATFORMS = ["twitch", "youtube", "kick", "facebook", "tiktok", "other"];
 
 export default function AddChatScreen() {
   const insets = useSafeAreaInsets();
-  const { addChat, updateChat, chats } = useChats();
+  const { addChat, updateChat, chats, isLoading } = useChats();
   const params = useLocalSearchParams<{ editId?: string }>();
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
@@ -32,57 +34,90 @@ export default function AddChatScreen() {
   const [url, setUrl] = useState(editingChat?.url || "");
   const [platform, setPlatform] = useState(editingChat?.platform || "");
   const [autoDetected, setAutoDetected] = useState(false);
+  const [platformManuallySelected, setPlatformManuallySelected] = useState(Boolean(editingChat));
+  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
-    if (url && !editingChat) {
-      const detected = detectPlatform(url);
-      if (detected !== "other") {
-        setPlatform(detected);
-        setAutoDetected(true);
-      } else {
-        setAutoDetected(false);
-      }
+    if (!params.editId || isLoading || !editingChat) return;
+    setName(editingChat.name);
+    setUrl(editingChat.url);
+    setPlatform(editingChat.platform);
+    setPlatformManuallySelected(true);
+    setAutoDetected(false);
+  }, [editingChat, isLoading, params.editId]);
+
+  useEffect(() => {
+    if (params.editId && !isLoading && !editingChat) {
+      Alert.alert("Chat Not Found", "This chat no longer exists.", [
+        { text: "OK", onPress: () => router.back() },
+      ]);
     }
-  }, [url, editingChat]);
+  }, [editingChat, isLoading, params.editId]);
+
+  useEffect(() => {
+    if (url && !editingChat && !platformManuallySelected) {
+      const detected = detectPlatform(url);
+      setPlatform(detected);
+      setAutoDetected(detected !== "other");
+    }
+  }, [url, editingChat, platformManuallySelected]);
 
   const handleSave = async () => {
+    if (saving) return;
     if (!name.trim()) {
       Alert.alert("Missing Name", "Please enter a name for this chat.");
       return;
     }
-    if (!url.trim()) {
-      Alert.alert("Missing URL", "Please enter the chat or stream URL.");
+    const normalizedUrl = normalizeChatUrl(url);
+    if (!normalizedUrl) {
+      Alert.alert("Invalid URL", "Enter a valid HTTP or HTTPS chat URL.");
       return;
     }
 
-    Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+    const finalPlatform = platform || detectPlatform(normalizedUrl);
+    if (!isResolvableChatUrl(normalizedUrl, finalPlatform)) {
+      Alert.alert(
+        "Unsupported Chat URL",
+        "Use a channel URL for Twitch or Kick, or a YouTube live/watch URL containing the video ID.",
+      );
+      return;
+    }
+    setSaving(true);
 
-    const finalPlatform = platform || detectPlatform(url);
-
-    if (editingChat) {
-      await updateChat(editingChat.id, {
-        name: name.trim(),
-        url: url.trim(),
-        platform: finalPlatform,
-      });
-      router.push({
-        pathname: "/platform-login",
-        params: { platform: finalPlatform, chatUrl: url.trim() },
-      } as any);
-    } else {
-      await addChat({
-        name: name.trim(),
-        url: url.trim(),
-        platform: finalPlatform,
-        enabled: true,
-        pinned: false,
-      });
-      router.push({
-        pathname: "/platform-login",
-        params: { platform: finalPlatform, chatUrl: url.trim() },
-      } as any);
+    try {
+      if (editingChat) {
+        await updateChat(editingChat.id, {
+          name: name.trim(),
+          url: normalizedUrl,
+          platform: finalPlatform,
+        });
+      } else {
+        await addChat({
+          name: name.trim(),
+          url: normalizedUrl,
+          platform: finalPlatform,
+          enabled: true,
+          pinned: false,
+        });
+      }
+      await Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      router.back();
+    } catch {
+      Alert.alert("Could Not Save", "The chat could not be saved. Please try again.");
+      setSaving(false);
     }
   };
+
+  if (isLoading && params.editId) {
+    return (
+      <View style={styles.container}>
+        <View style={styles.loadingState}>
+          <ActivityIndicator color={Colors.dark.primary} />
+          <Text style={styles.helpText}>Loading chat...</Text>
+        </View>
+      </View>
+    );
+  }
 
   return (
     <View style={styles.container}>
@@ -91,8 +126,12 @@ export default function AddChatScreen() {
           <Ionicons name="chevron-back" size={24} color={Colors.dark.text} />
         </Pressable>
         <Text style={styles.headerTitle}>{editingChat ? "Edit Chat" : "Add Chat"}</Text>
-        <Pressable onPress={handleSave} hitSlop={12}>
-          <Ionicons name="checkmark" size={26} color={Colors.dark.primary} />
+        <Pressable onPress={handleSave} hitSlop={12} disabled={saving}>
+          {saving ? (
+            <ActivityIndicator size="small" color={Colors.dark.primary} />
+          ) : (
+            <Ionicons name="checkmark" size={26} color={Colors.dark.primary} />
+          )}
         </Pressable>
       </View>
 
@@ -143,8 +182,9 @@ export default function AddChatScreen() {
                 key={p}
                 onPress={() => {
                   Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-                  setPlatform(p);
-                  setAutoDetected(false);
+                   setPlatform(p);
+                   setPlatformManuallySelected(true);
+                   setAutoDetected(false);
                 }}
                 style={[styles.platformOption, platform === p && styles.platformSelected]}
               >
@@ -268,5 +308,11 @@ const styles = StyleSheet.create({
     fontFamily: "Inter_400Regular",
     color: Colors.dark.textMuted,
     lineHeight: 18,
+  },
+  loadingState: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 12,
   },
 });

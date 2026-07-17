@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, Pressable, StyleSheet, Platform, ScrollView, Dimensions, Switch } from "react-native";
+import { View, Text, Pressable, StyleSheet, Platform, ScrollView, Switch, useWindowDimensions, Alert } from "react-native";
 import { router } from "expo-router";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { Ionicons, MaterialCommunityIcons } from "@expo/vector-icons";
@@ -14,25 +14,38 @@ import { useChats } from "@/lib/chat-context";
 
 type LayoutMode = "columns" | "grid" | "list" | "merged";
 
+function KeepAwakeGuard() {
+  useKeepAwake();
+  return null;
+}
+
 export default function MultiChatScreen() {
   const insets = useSafeAreaInsets();
   const { activeChats, settings, updateSettings, togglePin } = useChats();
   const [showControls, setShowControls] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
-  const [layout, setLayout] = useState<LayoutMode>(settings.layout);
-  const [fontSize, setFontSize] = useState(settings.fontSize);
-  const [unifiedMode, setUnifiedMode] = useState(settings.unifiedMode);
+  const layout: LayoutMode = settings.layout;
+  const fontSize = settings.fontSize;
+  const unifiedMode = settings.unifiedMode;
   const webTopInset = Platform.OS === "web" ? 67 : 0;
+  const { width: screenWidth } = useWindowDimensions();
 
-  useKeepAwake();
+  const persistSettings = (updates: Parameters<typeof updateSettings>[0]) => {
+    void updateSettings(updates).catch(() => {
+      Alert.alert("Could Not Save", "The setting could not be persisted.");
+    });
+  };
 
-  const screenWidth = Dimensions.get("window").width;
+  const persistPin = (chatId: string) => {
+    void togglePin(chatId).catch(() => {
+      Alert.alert("Could Not Save", "The pinned state could not be persisted.");
+    });
+  };
 
   const toggleUnifiedMode = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
     const next = !unifiedMode;
-    setUnifiedMode(next);
-    updateSettings({ unifiedMode: next });
+    persistSettings({ unifiedMode: next });
     if (!next) {
       setFullscreen(false);
       setShowControls(true);
@@ -44,15 +57,13 @@ export default function MultiChatScreen() {
     const modes: LayoutMode[] = ["columns", "grid", "list", "merged"];
     const nextIndex = (modes.indexOf(layout) + 1) % modes.length;
     const next = modes[nextIndex];
-    setLayout(next);
-    updateSettings({ layout: next as any });
+    persistSettings({ layout: next });
   };
 
   const adjustFontSize = (delta: number) => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     const newSize = Math.max(10, Math.min(24, fontSize + delta));
-    setFontSize(newSize);
-    updateSettings({ fontSize: newSize });
+    persistSettings({ fontSize: newSize });
   };
 
   const getLayoutIcon = (): string => {
@@ -119,7 +130,7 @@ export default function MultiChatScreen() {
         <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.listLayout}>
           {activeChats.map((chat) => (
             <View key={chat.id} style={styles.listItem}>
-              <ChatWebView chat={chat} compact fontSize={fontSize} onPin={() => togglePin(chat.id)} />
+              <ChatWebView chat={chat} compact fontSize={fontSize} onPin={() => persistPin(chat.id)} />
             </View>
           ))}
         </ScrollView>
@@ -134,7 +145,7 @@ export default function MultiChatScreen() {
         <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.gridLayout}>
           {activeChats.map((chat) => (
             <View key={chat.id} style={[styles.gridItem, { width: cols > 1 ? chatWidth : "100%" }]}>
-              <ChatWebView chat={chat} compact fontSize={fontSize} onPin={() => togglePin(chat.id)} />
+              <ChatWebView chat={chat} compact fontSize={fontSize} onPin={() => persistPin(chat.id)} />
             </View>
           ))}
         </ScrollView>
@@ -145,7 +156,7 @@ export default function MultiChatScreen() {
       <View style={styles.columnsLayout}>
         {activeChats.map((chat) => (
           <View key={chat.id} style={styles.columnItem}>
-            <ChatWebView chat={chat} fontSize={fontSize} onPin={() => togglePin(chat.id)} />
+            <ChatWebView chat={chat} fontSize={fontSize} onPin={() => persistPin(chat.id)} />
           </View>
         ))}
       </View>
@@ -154,6 +165,7 @@ export default function MultiChatScreen() {
 
   return (
     <View style={styles.container}>
+      {settings.keepScreenOn && <KeepAwakeGuard />}
       {showControls && (
         <Animated.View
           entering={FadeIn.duration(200)}
@@ -171,6 +183,17 @@ export default function MultiChatScreen() {
           </View>
 
           <View style={styles.toolbarActions}>
+            <Pressable
+              onPress={() => persistSettings({ keepScreenOn: !settings.keepScreenOn })}
+              hitSlop={8}
+              style={styles.toolBtn}
+            >
+              <Ionicons
+                name={settings.keepScreenOn ? "sunny" : "sunny-outline"}
+                size={18}
+                color={settings.keepScreenOn ? Colors.dark.warning : Colors.dark.textMuted}
+              />
+            </Pressable>
             <Pressable onPress={() => adjustFontSize(-1)} hitSlop={8} style={styles.toolBtn}>
               <MaterialCommunityIcons name="format-font-size-decrease" size={18} color={Colors.dark.textSecondary} />
             </Pressable>

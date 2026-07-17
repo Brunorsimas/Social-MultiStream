@@ -1,5 +1,5 @@
 import React, { useRef, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, Dimensions } from "react-native";
+import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, useWindowDimensions } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
@@ -7,6 +7,7 @@ import * as Haptics from "expo-haptics";
 import Colors from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
+import { getCurrentEmbedDomain } from "@/lib/chat-url";
 
 interface UnifiedChatViewProps {
   chats: ChatConfig[];
@@ -25,7 +26,7 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
   const webViewRef = useRef<WebView>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
-  const embedUrl = getChatEmbedUrl(chat.url);
+  const embedUrl = getChatEmbedUrl(chat.url, Platform.OS === "web" ? getCurrentEmbedDomain() : undefined);
   const animatedHeight = useSharedValue(isCollapsed ? 40 : height);
 
   React.useEffect(() => {
@@ -111,6 +112,7 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
           ) : Platform.OS === "web" ? (
             <iframe
               src={embedUrl}
+              onLoad={() => setLoading(false)}
               style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
               allow="autoplay"
             />
@@ -127,8 +129,8 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
               allowsInlineMediaPlayback
               mediaPlaybackRequiresUserAction={false}
               startInLoadingState={false}
-              originWhitelist={["*"]}
-              mixedContentMode="always"
+              originWhitelist={["http://*", "https://*"]}
+              mixedContentMode="compatibility"
             />
           )}
         </View>
@@ -139,7 +141,7 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
 
 export default function UnifiedChatView({ chats, fontSize = 14 }: UnifiedChatViewProps) {
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
-  const screenHeight = Dimensions.get("window").height;
+  const { height: screenHeight } = useWindowDimensions();
 
   const expandedCount = chats.filter((c) => !collapsedIds.has(c.id)).length;
   const collapsedCount = chats.length - expandedCount;

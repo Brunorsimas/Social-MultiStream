@@ -10,6 +10,7 @@ interface ChatCardProps {
   chat: ChatConfig;
   onToggle: () => void;
   onEdit: () => void;
+  onOpen: () => void;
   onDelete: () => void;
   onPin: () => void;
   onMoveUp?: () => void;
@@ -22,6 +23,7 @@ export default function ChatCard({
   chat,
   onToggle,
   onEdit,
+  onOpen,
   onDelete,
   onPin,
   onMoveUp,
@@ -88,6 +90,15 @@ export default function ChatCard({
           </Pressable>
         )}
         <View style={styles.spacer} />
+        <Pressable
+          onPress={() => {
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onOpen();
+          }}
+          style={styles.actionBtn}
+        >
+          <Ionicons name="open-outline" size={18} color={Colors.dark.textSecondary} />
+        </Pressable>
         <Pressable
           onPress={() => {
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
