@@ -2,7 +2,7 @@ import React, { useRef, useCallback, useMemo, useEffect } from "react";
 import { View, StyleSheet, Platform } from "react-native";
 import { WebView } from "react-native-webview";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
-import { getScraperForPlatform } from "@/lib/chat-scrapers";
+import { getKickSocketInterceptor, getScraperForPlatform } from "@/lib/chat-scrapers";
 import { globalAggregator, UnifiedChatMessage } from "@/lib/message-aggregator";
 import { getApiUrl } from "@/lib/api-url";
 import { getKickChannelName } from "@/lib/chat-url";
@@ -92,6 +92,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
 }: HiddenChatCollectorProps) {
   const webViewRef = useRef<WebView>(null);
   const embedUrl = getChatEmbedUrl(chat.url);
+  const isKick = chat.platform === "kick";
 
   useKickSSE(chat);
 
@@ -106,6 +107,11 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
       ${scraperScript}
     `;
   }, [chat.id, chat.name, chat.platform, fontSize]);
+
+  const injectedBeforeLoad = useMemo(
+    () => isKick ? getKickSocketInterceptor(chat.id, chat.name) : undefined,
+    [chat.id, chat.name, isKick],
+  );
 
   const handleMessage = useCallback(
     (event: any) => {
@@ -138,15 +144,25 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
   }
 
   return (
-    <View style={styles.hiddenContainer}>
+    <View
+      collapsable={false}
+      pointerEvents="none"
+      style={isKick ? styles.kickCollectorContainer : styles.hiddenContainer}
+    >
       <WebView
         ref={webViewRef}
         source={{ uri: embedUrl }}
-        style={styles.hiddenWebView}
+        style={isKick ? styles.kickCollectorWebView : styles.hiddenWebView}
         onMessage={handleMessage}
+        injectedJavaScriptBeforeContentLoaded={injectedBeforeLoad}
         injectedJavaScript={injectedJS}
         javaScriptEnabled
         domStorageEnabled
+        {...(isKick ? {
+          thirdPartyCookiesEnabled: true,
+          sharedCookiesEnabled: true,
+          setSupportMultipleWindows: false,
+        } : {})}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={false}
@@ -171,5 +187,18 @@ const styles = StyleSheet.create({
     width: 1,
     height: 1,
     opacity: 0,
+  },
+  kickCollectorContainer: {
+    position: "absolute",
+    left: 0,
+    top: 0,
+    width: 420,
+    height: 800,
+    opacity: 0,
+    overflow: "hidden",
+  },
+  kickCollectorWebView: {
+    width: 420,
+    height: 800,
   },
 });
