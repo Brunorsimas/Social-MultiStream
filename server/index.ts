@@ -1,6 +1,7 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
+import { resolvePublicOrigin } from "./security";
 import * as fs from "fs";
 import * as path from "path";
 
@@ -141,12 +142,17 @@ function serveLandingPage({
   landingPageTemplate: string;
   appName: string;
 }) {
-  const forwardedProto = req.header("x-forwarded-proto");
-  const protocol = forwardedProto || req.protocol || "https";
-  const forwardedHost = req.header("x-forwarded-host");
-  const host = forwardedHost || req.get("host");
-  const baseUrl = `${protocol}://${host}`;
-  const expsUrl = `${host}`;
+  const configuredDomain =
+    process.env.REPLIT_INTERNAL_APP_DOMAIN ??
+    process.env.REPLIT_DEV_DOMAIN ??
+    process.env.REPLIT_DOMAINS?.split(",")[0] ??
+    process.env.EXPO_PUBLIC_DOMAIN;
+  const { host, origin: baseUrl } = resolvePublicOrigin(
+    configuredDomain,
+    req.get("host"),
+    req.protocol,
+  );
+  const expsUrl = host;
 
   log(`baseUrl`, baseUrl);
   log(`expsUrl`, expsUrl);

@@ -1,8 +1,50 @@
 import type { Request, Response } from "express";
+import { isIP } from "node:net";
 import WebSocket from "ws";
+import { ConnectionLimiter } from "./security";
 
 const PUSHER_URL =
   "wss://ws-us3.pusher.com/app/dd11c46dae0376080879?protocol=7&client=js&version=7.6.0&flash=false";
+const MAX_CONNECTION_LIFETIME_MS = 6 * 60 * 60 * 1_000;
+const kickConnectionLimiter = new ConnectionLimiter({
+  maxActiveTotal: 100,
+  maxActivePerKey: 10,
+  maxAttemptsTotalPerWindow: 300,
+  maxAttemptsPerWindow: 30,
+  windowMs: 60_000,
+});
+
+function isPrivateOrLoopback(address: string): boolean {
+  const normalized = address.toLowerCase();
+  const ipv4 = normalized.startsWith("::ffff:")
+    ? normalized.slice("::ffff:".length)
+    : normalized;
+  return (
+    normalized === "::1" ||
+    ipv4.startsWith("127.") ||
+    ipv4.startsWith("10.") ||
+    ipv4.startsWith("192.168.") ||
+    /^172\.(1[6-9]|2\d|3[01])\./.test(ipv4) ||
+    normalized.startsWith("fc") ||
+    normalized.startsWith("fd")
+  );
+}
+
+function getClientKey(req: Request): string {
+  const remoteAddress = req.socket.remoteAddress ?? "unknown";
+
+  if (isPrivateOrLoopback(remoteAddress)) {
+    const forwardedAddress = req
+      .header("x-forwarded-for")
+      ?.split(",")[0]
+      ?.trim();
+    if (forwardedAddress && isIP(forwardedAddress)) {
+      return forwardedAddress;
+    }
+  }
+
+  return remoteAddress;
+}
 
 async function getKickChatroomId(channel: string): Promise<number | null> {
   try {
@@ -28,7 +70,12 @@ async function getKickChatroomId(channel: string): Promise<number | null> {
 }
 
 export async function kickChatSSE(req: Request, res: Response): Promise<void> {
-  const channel = (req.params.channel ?? "").toLowerCase().trim();
+  const channelParam = req.params.channel;
+  const channel = (
+    Array.isArray(channelParam) ? channelParam[0] : (channelParam ?? "")
+  )
+    .toLowerCase()
+    .trim();
   if (!channel) {
     res.status(400).json({ error: "Missing channel name" });
     return;
@@ -38,7 +85,45 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
     return;
   }
 
+  const lease = kickConnectionLimiter.tryAcquire(getClientKey(req));
+  if (lease.ok === false) {
+    res.setHeader("Retry-After", String(lease.retryAfterSeconds));
+    res.status(lease.status).json({ error: lease.reason });
+    return;
+  }
+
+  let closed = false;
+  let pingTimer: ReturnType<typeof setInterval> | null = null;
+  let ws: WebSocket | undefined;
+  let maxLifetimeTimer: ReturnType<typeof setTimeout>;
+
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(maxLifetimeTimer);
+    if (pingTimer) clearInterval(pingTimer);
+    lease.release();
+    try {
+      ws?.close();
+    } catch {}
+  };
+
+  maxLifetimeTimer = setTimeout(() => {
+    cleanup();
+    if (!res.writableEnded) res.end();
+  }, MAX_CONNECTION_LIFETIME_MS);
+  maxLifetimeTimer.unref?.();
+
+  req.once("close", () => {
+    console.log(`[kick] Client disconnected from SSE for "${channel}"`);
+    cleanup();
+  });
+  res.once("close", cleanup);
+  res.once("finish", cleanup);
+
   const chatroomId = await getKickChatroomId(channel);
+  if (closed || res.destroyed) return;
+
   if (!chatroomId) {
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
@@ -66,17 +151,6 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
 
   send({ type: "connected", chatroomId });
   console.log(`[kick] SSE connected for "${channel}" (chatroom ${chatroomId})`);
-
-  let closed = false;
-  let pingTimer: ReturnType<typeof setInterval> | null = null;
-  let ws: WebSocket;
-
-  const cleanup = () => {
-    if (closed) return;
-    closed = true;
-    if (pingTimer) clearInterval(pingTimer);
-    try { ws?.close(); } catch {}
-  };
 
   try {
     ws = new WebSocket(PUSHER_URL);
@@ -142,10 +216,5 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
     if (!closed) send({ type: "disconnected" });
     cleanup();
     try { res.end(); } catch {}
-  });
-
-  req.on("close", () => {
-    console.log(`[kick] Client disconnected from SSE for "${channel}"`);
-    cleanup();
   });
 }
