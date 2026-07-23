@@ -112,7 +112,11 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
     cleanup();
     if (!res.writableEnded) res.end();
   }, MAX_CONNECTION_LIFETIME_MS);
-  maxLifetimeTimer.unref?.();
+  (
+    maxLifetimeTimer as ReturnType<typeof setTimeout> & {
+      unref?: () => void;
+    }
+  ).unref?.();
 
   req.once("close", () => {
     console.log(`[kick] Client disconnected from SSE for "${channel}"`);
