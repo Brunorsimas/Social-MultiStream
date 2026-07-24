@@ -32,8 +32,12 @@ runButton = "Project"
 
 [[workflows.workflow]]
 name = "Project"
-mode = "parallel"
+mode = "sequential"
 author = "agent"
+
+[[workflows.workflow.tasks]]
+task = "shell.exec"
+args = "npm install --legacy-peer-deps --prefer-offline --no-audit"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"
