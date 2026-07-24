@@ -1,12 +1,19 @@
 import express from "express";
 import type { Request, Response, NextFunction } from "express";
 import { registerRoutes } from "./routes";
-import { resolvePublicOrigin } from "./security";
+import {
+  buildContentSecurityPolicy,
+  escapeHtml,
+  normalizePublicHost,
+  resolvePublicOrigin,
+} from "./security";
 import * as fs from "fs";
 import * as path from "path";
+import { randomBytes } from "node:crypto";
 
 const app = express();
 const log = console.log;
+app.disable("x-powered-by");
 
 declare module "http" {
   interface IncomingMessage {
@@ -18,31 +25,45 @@ function setupCors(app: express.Application) {
   app.use((req, res, next) => {
     const origins = new Set<string>();
 
-    if (process.env.REPLIT_DEV_DOMAIN) {
-      origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
-    }
+    const addConfiguredOrigin = (value?: string) => {
+      if (!normalizePublicHost(value)) return;
+      origins.add(resolvePublicOrigin(value).origin);
+    };
+
+    addConfiguredOrigin(process.env.REPLIT_INTERNAL_APP_DOMAIN);
+    addConfiguredOrigin(process.env.REPLIT_DEV_DOMAIN);
+    addConfiguredOrigin(process.env.EXPO_PUBLIC_DOMAIN);
 
     if (process.env.REPLIT_DOMAINS) {
       process.env.REPLIT_DOMAINS.split(",").forEach((d) => {
-        origins.add(`https://${d.trim()}`);
+        addConfiguredOrigin(d);
       });
     }
 
     const origin = req.header("origin");
 
-    // Allow localhost origins for Expo web development (any port)
-    const isLocalhost =
-      origin?.startsWith("http://localhost:") ||
-      origin?.startsWith("http://127.0.0.1:");
+    let isLocalhost = false;
+    if (origin) {
+      try {
+        const parsedOrigin = new URL(origin);
+        isLocalhost =
+          (parsedOrigin.protocol === "http:" ||
+            parsedOrigin.protocol === "https:") &&
+          (parsedOrigin.hostname === "localhost" ||
+            parsedOrigin.hostname === "127.0.0.1" ||
+            parsedOrigin.hostname === "::1") &&
+          parsedOrigin.origin === origin;
+      } catch {}
+    }
 
     if (origin && (origins.has(origin) || isLocalhost)) {
+      res.vary("Origin");
       res.header("Access-Control-Allow-Origin", origin);
       res.header(
         "Access-Control-Allow-Methods",
-        "GET, POST, PUT, DELETE, OPTIONS",
+        "GET, OPTIONS",
       );
       res.header("Access-Control-Allow-Headers", "Content-Type");
-      res.header("Access-Control-Allow-Credentials", "true");
     }
 
     if (req.method === "OPTIONS") {
@@ -53,40 +74,47 @@ function setupCors(app: express.Application) {
   });
 }
 
+function setupSecurityHeaders(app: express.Application) {
+  app.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(), payment=()",
+    );
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains",
+      );
+    }
+    next();
+  });
+}
+
 function setupBodyParsing(app: express.Application) {
   app.use(
     express.json({
+      limit: "100kb",
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       },
     }),
   );
 
-  app.use(express.urlencoded({ extended: false }));
+  app.use(express.urlencoded({ extended: false, limit: "100kb" }));
 }
 
 function setupRequestLogging(app: express.Application) {
   app.use((req, res, next) => {
     const start = Date.now();
     const path = req.path;
-    let capturedJsonResponse: Record<string, unknown> | undefined = undefined;
-
-    const originalResJson = res.json;
-    res.json = function (bodyJson, ...args) {
-      capturedJsonResponse = bodyJson;
-      return originalResJson.apply(res, [bodyJson, ...args]);
-    };
-
     res.on("finish", () => {
       if (!path.startsWith("/api")) return;
 
       const duration = Date.now() - start;
 
       let logLine = `${req.method} ${path} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
-
       if (logLine.length > 80) {
         logLine = logLine.slice(0, 79) + "…";
       }
@@ -147,12 +175,20 @@ function serveLandingPage({
     process.env.REPLIT_DEV_DOMAIN ??
     process.env.REPLIT_DOMAINS?.split(",")[0] ??
     process.env.EXPO_PUBLIC_DOMAIN;
+  if (
+    process.env.NODE_ENV === "production" &&
+    !normalizePublicHost(configuredDomain)
+  ) {
+    res.status(503).type("text/plain").send("Service unavailable");
+    return;
+  }
   const { host, origin: baseUrl } = resolvePublicOrigin(
     configuredDomain,
     req.get("host"),
     req.protocol,
   );
   const expsUrl = host;
+  const cspNonce = randomBytes(18).toString("base64");
 
   log(`baseUrl`, baseUrl);
   log(`expsUrl`, expsUrl);
@@ -160,9 +196,16 @@ function serveLandingPage({
   const html = landingPageTemplate
     .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
     .replace(/EXPS_URL_PLACEHOLDER/g, expsUrl)
-    .replace(/APP_NAME_PLACEHOLDER/g, appName);
+    .replace(/APP_NAME_PLACEHOLDER/g, escapeHtml(appName))
+    .replace(/CSP_NONCE_PLACEHOLDER/g, cspNonce);
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader(
+    "Content-Security-Policy",
+    buildContentSecurityPolicy(cspNonce),
+  );
   res.status(200).send(html);
 }
 
@@ -211,17 +254,34 @@ function configureExpoAndLanding(app: express.Application) {
 }
 
 function setupErrorHandler(app: express.Application) {
-  app.use((err: unknown, _req: Request, res: Response, next: NextFunction) => {
+  app.use((err: unknown, req: Request, res: Response, next: NextFunction) => {
     const error = err as {
       status?: number;
       statusCode?: number;
       message?: string;
     };
 
-    const status = error.status || error.statusCode || 500;
-    const message = error.message || "Internal Server Error";
+    const candidateStatus = error.status || error.statusCode;
+    const status =
+      Number.isInteger(candidateStatus) &&
+      Number(candidateStatus) >= 400 &&
+      Number(candidateStatus) <= 599
+        ? Number(candidateStatus)
+        : 500;
+    const message =
+      status >= 500
+        ? "Internal Server Error"
+        : error.message || "Request failed";
 
-    console.error("Internal Server Error:", err);
+    if (status >= 500) {
+      const diagnostic =
+        err instanceof Error ? `${err.name}: ${err.message}` : "Unknown error";
+      console.error(
+        `${req.method} ${req.path} failed: ${diagnostic
+          .replace(/[\r\n]/g, " ")
+          .slice(0, 500)}`,
+      );
+    }
 
     if (res.headersSent) {
       return next(err);
@@ -231,7 +291,8 @@ function setupErrorHandler(app: express.Application) {
   });
 }
 
-(async () => {
+async function startServer() {
+  setupSecurityHeaders(app);
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
@@ -247,10 +308,13 @@ function setupErrorHandler(app: express.Application) {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true,
+      ...(process.platform === "win32" ? {} : { reusePort: true }),
     },
     () => {
       log(`express server serving on port ${port}`);
     },
   );
-})();
+  return server;
+}
+
+export const serverPromise = startServer();

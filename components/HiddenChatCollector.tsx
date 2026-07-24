@@ -3,9 +3,15 @@ import { View, StyleSheet, Platform } from "react-native";
 import { WebView } from "react-native-webview";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getKickSocketInterceptor, getScraperForPlatform } from "@/lib/chat-scrapers";
-import { globalAggregator, UnifiedChatMessage } from "@/lib/message-aggregator";
+import { globalAggregator } from "@/lib/message-aggregator";
 import { getApiUrl } from "@/lib/api-url";
 import { getKickChannelName } from "@/lib/chat-url";
+import {
+  getWebViewOriginWhitelist,
+  isAllowedWebViewNavigation,
+  normalizeCollectorEvent,
+  shouldShareWebViewCookies,
+} from "@/lib/webview-security";
 
 interface HiddenChatCollectorProps {
   chat: ChatConfig;
@@ -93,6 +99,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
   const webViewRef = useRef<WebView>(null);
   const embedUrl = getChatEmbedUrl(chat.url);
   const isKick = chat.platform === "kick";
+  const shareCookies = shouldShareWebViewCookies(embedUrl, chat.platform);
 
   useKickSSE(chat);
 
@@ -115,28 +122,17 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
 
   const handleMessage = useCallback(
     (event: any) => {
-      try {
-        const data = JSON.parse(event.nativeEvent.data);
-        if (data.type === "chat_messages" && Array.isArray(data.messages)) {
-          const msgs: UnifiedChatMessage[] = data.messages
-            .filter((m: any) => m.messageId && m.message)
-            .map((m: any) => ({
-              messageId: String(m.messageId),
-              platform: m.platform || chat.platform,
-              chatId: m.chatId || chat.id,
-              chatName: m.chatName || chat.name,
-              userName: m.userName || "Unknown",
-              userAvatar: m.userAvatar || null,
-              message: String(m.message),
-              timestamp: m.timestamp || Date.now(),
-            }));
-          if (msgs.length > 0) {
-            globalAggregator.addMessages(msgs);
-          }
-        }
-      } catch (_) {}
+      const messages = normalizeCollectorEvent(
+        event?.nativeEvent?.data,
+        embedUrl,
+        event?.nativeEvent?.url,
+        chat,
+      );
+      if (messages.length > 0) {
+        globalAggregator.addMessages(messages);
+      }
     },
-    [chat.id, chat.name, chat.platform]
+    [chat, embedUrl]
   );
 
   if (Platform.OS === "web") {
@@ -158,16 +154,21 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
         injectedJavaScript={injectedJS}
         javaScriptEnabled
         domStorageEnabled
-        {...(isKick ? {
+        {...(shareCookies ? {
           thirdPartyCookiesEnabled: true,
           sharedCookiesEnabled: true,
+        } : {})}
+        {...(isKick ? {
           setSupportMultipleWindows: false,
         } : {})}
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={false}
-        originWhitelist={["http://*", "https://*"]}
-        mixedContentMode="compatibility"
+        originWhitelist={getWebViewOriginWhitelist(embedUrl, chat.platform)}
+        onShouldStartLoadWithRequest={({ url }) =>
+          isAllowedWebViewNavigation(url, embedUrl, chat.platform)
+        }
+        mixedContentMode="never"
       />
     </View>
   );

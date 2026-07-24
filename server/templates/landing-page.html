@@ -4,7 +4,7 @@
     <title>APP_NAME_PLACEHOLDER</title>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <style>
+    <style nonce="CSP_NONCE_PLACEHOLDER">
       * {
         box-sizing: border-box;
       }
@@ -354,6 +354,7 @@
                 href="https://apps.apple.com/app/id982107779"
                 class="store-button"
                 target="_blank"
+                rel="noopener noreferrer"
               >
                 <svg class="store-icon" viewBox="0 0 24 24" fill="currentColor">
                   <path
@@ -367,6 +368,7 @@
                 href="https://play.google.com/store/apps/details?id=host.exp.exponent"
                 class="store-button"
                 target="_blank"
+                rel="noopener noreferrer"
               >
                 <svg class="store-icon" viewBox="0 0 24 24" fill="currentColor">
                   <path
@@ -393,8 +395,13 @@
       </div>
     </div>
 
-    <script src="https://unpkg.com/qr-code-styling@1.6.0/lib/qr-code-styling.js"></script>
-    <script>
+    <script
+      nonce="CSP_NONCE_PLACEHOLDER"
+      src="https://unpkg.com/qr-code-styling@1.6.0/lib/qr-code-styling.js"
+      integrity="sha384-K7D1ZVqZVEPBKpQrjKR0/pDcFaWHQPzUBKNY5k8RRX5aGtd4WGHXEnO0qso4YowQ"
+      crossorigin="anonymous"
+    ></script>
+    <script nonce="CSP_NONCE_PLACEHOLDER">
       (function () {
         const ua = navigator.userAgent;
         const loadingEl = document.getElementById("loading");

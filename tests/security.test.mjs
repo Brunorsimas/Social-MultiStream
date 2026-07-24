@@ -1,11 +1,47 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import test from "node:test";
 
 import {
+  buildContentSecurityPolicy,
   ConnectionLimiter,
+  escapeHtml,
   normalizePublicHost,
+  resolveClientAddress,
   resolvePublicOrigin,
 } from "../server/security.ts";
+
+test("escapa HTML dinâmico e gera CSP restrita por nonce", () => {
+  assert.equal(
+    escapeHtml(`<img src=x onerror="alert('x')">`),
+    "&lt;img src=x onerror=&quot;alert(&#39;x&#39;)&quot;&gt;",
+  );
+
+  const policy = buildContentSecurityPolicy("test-nonce");
+  assert.match(policy, /script-src 'nonce-test-nonce'/);
+  assert.match(policy, /frame-ancestors 'none'/);
+  assert.doesNotMatch(policy, /https:|unpkg|\*/);
+});
+
+test("protege scripts e links externos da página inicial", () => {
+  const template = readFileSync(
+    new URL("../server/templates/landing-page.html", import.meta.url),
+    "utf8",
+  );
+
+  assert.equal(
+    template.match(/nonce="CSP_NONCE_PLACEHOLDER"/g)?.length,
+    3,
+  );
+  assert.match(
+    template,
+    /integrity="sha384-K7D1ZVqZVEPBKpQrjKR0\/pDcFaWHQPzUBKNY5k8RRX5aGtd4WGHXEnO0qso4YowQ"/,
+  );
+  assert.equal(
+    template.match(/rel="noopener noreferrer"/g)?.length,
+    2,
+  );
+});
 
 test("normaliza somente hosts seguros para uso no HTML", () => {
   assert.equal(normalizePublicHost("example.com:5000"), "example.com:5000");
@@ -123,4 +159,18 @@ test("limita globalmente as tentativas SSE, mesmo entre clientes diferentes", ()
     reason: "SSE connection attempt capacity reached",
   });
   assert.equal(limiter.tryAcquire("client-c", 1_000).ok, true);
+});
+
+test("usa o endereço público mais próximo do proxy e ignora o valor forjado", () => {
+  assert.equal(
+    resolveClientAddress(
+      "10.0.0.5",
+      "203.0.113.10, 198.51.100.20, 10.0.0.4",
+    ),
+    "198.51.100.20",
+  );
+  assert.equal(
+    resolveClientAddress("198.51.100.30", "203.0.113.99"),
+    "198.51.100.30",
+  );
 });

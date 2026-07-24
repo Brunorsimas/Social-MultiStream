@@ -5,10 +5,36 @@ import express from "express";
 import { createServer } from "node:http";
 
 // server/kick-chat.ts
-import { isIP } from "node:net";
 import WebSocket from "ws";
 
 // server/security.ts
+import { isIP } from "node:net";
+function escapeHtml(value) {
+  return value.replace(
+    /[&<>"']/g,
+    (character) => ({
+      "&": "&amp;",
+      "<": "&lt;",
+      ">": "&gt;",
+      '"': "&quot;",
+      "'": "&#39;"
+    })[character] ?? character
+  );
+}
+function buildContentSecurityPolicy(nonce) {
+  return [
+    "default-src 'none'",
+    `script-src 'nonce-${nonce}'`,
+    `style-src 'nonce-${nonce}'`,
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "object-src 'none'"
+  ].join("; ");
+}
 function parsePublicAddress(value) {
   const input = value?.trim();
   if (!input) return null;
@@ -30,6 +56,9 @@ function parsePublicAddress(value) {
     return null;
   }
 }
+function normalizePublicHost(value) {
+  return parsePublicAddress(value)?.host ?? null;
+}
 function resolvePublicOrigin(configuredDomain, requestHost, requestProtocol) {
   const configured = parsePublicAddress(configuredDomain);
   const request = parsePublicAddress(requestHost);
@@ -42,6 +71,33 @@ function resolvePublicOrigin(configuredDomain, requestHost, requestProtocol) {
     protocol,
     origin: `${protocol}://${host}`
   };
+}
+function isPrivateOrLoopbackAddress(address) {
+  const normalized = address.toLowerCase().trim();
+  if (!normalized || normalized === "unknown") return true;
+  if (normalized.startsWith("::ffff:")) {
+    return isPrivateOrLoopbackAddress(normalized.slice("::ffff:".length));
+  }
+  if (isIP(normalized) === 4) {
+    const octets = normalized.split(".").map(Number);
+    return octets[0] === 10 || octets[0] === 127 || octets[0] === 169 && octets[1] === 254 || octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31 || octets[0] === 192 && octets[1] === 168 || normalized === "0.0.0.0";
+  }
+  if (isIP(normalized) === 6) {
+    return normalized === "::" || normalized === "::1" || normalized.startsWith("fc") || normalized.startsWith("fd") || normalized.startsWith("fe8") || normalized.startsWith("fe9") || normalized.startsWith("fea") || normalized.startsWith("feb");
+  }
+  return true;
+}
+function resolveClientAddress(remoteAddress, forwardedFor) {
+  const remote = remoteAddress?.trim() || "unknown";
+  if (!isPrivateOrLoopbackAddress(remote) || !forwardedFor || forwardedFor.length > 2048) {
+    return remote;
+  }
+  const forwardedAddresses = forwardedFor.split(",").slice(0, 20).map((address) => address.trim()).filter((address) => isIP(address) !== 0);
+  for (let index = forwardedAddresses.length - 1; index >= 0; index -= 1) {
+    const address = forwardedAddresses[index];
+    if (!isPrivateOrLoopbackAddress(address)) return address;
+  }
+  return forwardedAddresses.at(-1) ?? remote;
 }
 var ConnectionLimiter = class {
   activeTotal = 0;
@@ -144,6 +200,11 @@ var ConnectionLimiter = class {
 // server/kick-chat.ts
 var PUSHER_URL = "wss://ws-us3.pusher.com/app/dd11c46dae0376080879?protocol=7&client=js&version=7.6.0&flash=false";
 var MAX_CONNECTION_LIFETIME_MS = 6 * 60 * 60 * 1e3;
+var MAX_PUSHER_PAYLOAD_BYTES = 256 * 1024;
+var MAX_MESSAGE_LENGTH = 4e3;
+var MAX_USER_NAME_LENGTH = 80;
+var MAX_MESSAGE_ID_LENGTH = 200;
+var MAX_AVATAR_URL_LENGTH = 2048;
 var kickConnectionLimiter = new ConnectionLimiter({
   maxActiveTotal: 100,
   maxActivePerKey: 10,
@@ -151,20 +212,32 @@ var kickConnectionLimiter = new ConnectionLimiter({
   maxAttemptsPerWindow: 30,
   windowMs: 6e4
 });
-function isPrivateOrLoopback(address) {
-  const normalized = address.toLowerCase();
-  const ipv4 = normalized.startsWith("::ffff:") ? normalized.slice("::ffff:".length) : normalized;
-  return normalized === "::1" || ipv4.startsWith("127.") || ipv4.startsWith("10.") || ipv4.startsWith("192.168.") || /^172\.(1[6-9]|2\d|3[01])\./.test(ipv4) || normalized.startsWith("fc") || normalized.startsWith("fd");
-}
 function getClientKey(req) {
-  const remoteAddress = req.socket.remoteAddress ?? "unknown";
-  if (isPrivateOrLoopback(remoteAddress)) {
-    const forwardedAddress = req.header("x-forwarded-for")?.split(",")[0]?.trim();
-    if (forwardedAddress && isIP(forwardedAddress)) {
-      return forwardedAddress;
-    }
+  return resolveClientAddress(
+    req.socket.remoteAddress,
+    req.header("x-forwarded-for")
+  );
+}
+function boundedString(value, maxLength) {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  return String(value).trim().slice(0, maxLength);
+}
+function safeAvatarUrl(value) {
+  if (typeof value !== "string" || value.length > MAX_AVATAR_URL_LENGTH) {
+    return null;
   }
-  return remoteAddress;
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+function rawDataSize(raw) {
+  if (Array.isArray(raw)) {
+    return raw.reduce((total, item) => total + item.byteLength, 0);
+  }
+  return raw.byteLength;
 }
 async function getKickChatroomId(channel) {
   try {
@@ -180,8 +253,11 @@ async function getKickChatroomId(channel) {
     if (!response.ok) throw new Error(`Kick API returned HTTP ${response.status}`);
     const data = await response.json();
     const id = data?.chatroom?.id;
+    if (!Number.isSafeInteger(id) || Number(id) <= 0) {
+      throw new Error("Kick API returned an invalid chatroom id");
+    }
     console.log(`[kick] Channel "${channel}" -> chatroomId: ${id}`);
-    return id ?? null;
+    return Number(id);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[kick] Failed to get chatroom id for "${channel}": ${message}`);
@@ -208,12 +284,21 @@ async function kickChatSSE(req, res) {
   let closed = false;
   let pingTimer = null;
   let ws;
+  let backpressured = false;
   let maxLifetimeTimer;
+  const handleDrain = () => {
+    backpressured = false;
+    try {
+      ws?.resume();
+    } catch {
+    }
+  };
   const cleanup = () => {
     if (closed) return;
     closed = true;
     clearTimeout(maxLifetimeTimer);
     if (pingTimer) clearInterval(pingTimer);
+    res.off("drain", handleDrain);
     lease.release();
     try {
       ws?.close();
@@ -231,6 +316,7 @@ async function kickChatSSE(req, res) {
   });
   res.once("close", cleanup);
   res.once("finish", cleanup);
+  res.on("drain", handleDrain);
   const chatroomId = await getKickChatroomId(channel);
   if (closed || res.destroyed) return;
   if (!chatroomId) {
@@ -253,17 +339,32 @@ async function kickChatSSE(req, res) {
     "X-Accel-Buffering": "no"
   });
   const send = (payload) => {
+    if (closed || res.writableEnded || res.destroyed || backpressured) {
+      return false;
+    }
     try {
-      res.write(`data: ${JSON.stringify(payload)}
+      const accepted = res.write(`data: ${JSON.stringify(payload)}
 
 `);
+      if (!accepted) {
+        backpressured = true;
+        try {
+          ws?.pause();
+        } catch {
+        }
+      }
+      return accepted;
     } catch {
+      return false;
     }
   };
   send({ type: "connected", chatroomId });
   console.log(`[kick] SSE connected for "${channel}" (chatroom ${chatroomId})`);
   try {
-    ws = new WebSocket(PUSHER_URL);
+    ws = new WebSocket(PUSHER_URL, {
+      maxPayload: MAX_PUSHER_PAYLOAD_BYTES,
+      perMessageDeflate: false
+    });
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[kick] WebSocket init failed: ${message}`);
@@ -272,6 +373,7 @@ async function kickChatSSE(req, res) {
     return;
   }
   ws.on("open", () => {
+    if (backpressured) ws.pause();
     console.log(`[kick] Pusher connected, subscribing to chatrooms.${chatroomId}.v2`);
     ws.send(
       JSON.stringify({
@@ -286,19 +388,23 @@ async function kickChatSSE(req, res) {
     }, 25e3);
   });
   ws.on("message", (raw) => {
+    if (rawDataSize(raw) > MAX_PUSHER_PAYLOAD_BYTES) return;
     try {
       const msg = JSON.parse(raw.toString());
       if (msg.event === "App\\Events\\ChatMessageEvent") {
         const d = typeof msg.data === "string" ? JSON.parse(msg.data) : msg.data;
-        const content = String(d.content ?? "").trim();
+        const content = boundedString(d?.content, MAX_MESSAGE_LENGTH);
         if (!content) return;
+        const timestamp = d.created_at ? new Date(d.created_at).getTime() : Date.now();
         send({
           type: "message",
-          messageId: d.id ?? `${Date.now()}-${Math.random()}`,
-          userName: d.sender?.username ?? "Unknown",
-          userAvatar: d.sender?.profile_picture ?? d.sender?.profile_pic ?? null,
+          messageId: boundedString(d.id, MAX_MESSAGE_ID_LENGTH) || `${Date.now()}-${Math.random()}`,
+          userName: boundedString(d.sender?.username, MAX_USER_NAME_LENGTH) || "Unknown",
+          userAvatar: safeAvatarUrl(
+            d.sender?.profile_picture ?? d.sender?.profile_pic
+          ),
           message: content,
-          timestamp: d.created_at ? new Date(d.created_at).getTime() : Date.now()
+          timestamp: Number.isFinite(timestamp) ? timestamp : Date.now()
         });
       } else if (msg.event === "pusher_internal:subscription_succeeded") {
         console.log(`[kick] Subscribed to chatrooms.${chatroomId}.v2`);
@@ -336,29 +442,42 @@ async function registerRoutes(app2) {
 // server/index.ts
 import * as fs from "fs";
 import * as path from "path";
+import { randomBytes } from "node:crypto";
 var app = express();
 var log = console.log;
+app.disable("x-powered-by");
 function setupCors(app2) {
   app2.use((req, res, next) => {
     const origins = /* @__PURE__ */ new Set();
-    if (process.env.REPLIT_DEV_DOMAIN) {
-      origins.add(`https://${process.env.REPLIT_DEV_DOMAIN}`);
-    }
+    const addConfiguredOrigin = (value) => {
+      if (!normalizePublicHost(value)) return;
+      origins.add(resolvePublicOrigin(value).origin);
+    };
+    addConfiguredOrigin(process.env.REPLIT_INTERNAL_APP_DOMAIN);
+    addConfiguredOrigin(process.env.REPLIT_DEV_DOMAIN);
+    addConfiguredOrigin(process.env.EXPO_PUBLIC_DOMAIN);
     if (process.env.REPLIT_DOMAINS) {
       process.env.REPLIT_DOMAINS.split(",").forEach((d) => {
-        origins.add(`https://${d.trim()}`);
+        addConfiguredOrigin(d);
       });
     }
     const origin = req.header("origin");
-    const isLocalhost = origin?.startsWith("http://localhost:") || origin?.startsWith("http://127.0.0.1:");
+    let isLocalhost = false;
+    if (origin) {
+      try {
+        const parsedOrigin = new URL(origin);
+        isLocalhost = (parsedOrigin.protocol === "http:" || parsedOrigin.protocol === "https:") && (parsedOrigin.hostname === "localhost" || parsedOrigin.hostname === "127.0.0.1" || parsedOrigin.hostname === "::1") && parsedOrigin.origin === origin;
+      } catch {
+      }
+    }
     if (origin && (origins.has(origin) || isLocalhost)) {
+      res.vary("Origin");
       res.header("Access-Control-Allow-Origin", origin);
       res.header(
         "Access-Control-Allow-Methods",
-        "GET, POST, PUT, DELETE, OPTIONS"
+        "GET, OPTIONS"
       );
       res.header("Access-Control-Allow-Headers", "Content-Type");
-      res.header("Access-Control-Allow-Credentials", "true");
     }
     if (req.method === "OPTIONS") {
       return res.sendStatus(200);
@@ -366,33 +485,42 @@ function setupCors(app2) {
     next();
   });
 }
+function setupSecurityHeaders(app2) {
+  app2.use((_req, res, next) => {
+    res.setHeader("X-Content-Type-Options", "nosniff");
+    res.setHeader("Referrer-Policy", "strict-origin-when-cross-origin");
+    res.setHeader(
+      "Permissions-Policy",
+      "camera=(), microphone=(), geolocation=(), payment=()"
+    );
+    if (process.env.NODE_ENV === "production") {
+      res.setHeader(
+        "Strict-Transport-Security",
+        "max-age=31536000; includeSubDomains"
+      );
+    }
+    next();
+  });
+}
 function setupBodyParsing(app2) {
   app2.use(
     express.json({
+      limit: "100kb",
       verify: (req, _res, buf) => {
         req.rawBody = buf;
       }
     })
   );
-  app2.use(express.urlencoded({ extended: false }));
+  app2.use(express.urlencoded({ extended: false, limit: "100kb" }));
 }
 function setupRequestLogging(app2) {
   app2.use((req, res, next) => {
     const start = Date.now();
     const path2 = req.path;
-    let capturedJsonResponse = void 0;
-    const originalResJson = res.json;
-    res.json = function(bodyJson, ...args) {
-      capturedJsonResponse = bodyJson;
-      return originalResJson.apply(res, [bodyJson, ...args]);
-    };
     res.on("finish", () => {
       if (!path2.startsWith("/api")) return;
       const duration = Date.now() - start;
       let logLine = `${req.method} ${path2} ${res.statusCode} in ${duration}ms`;
-      if (capturedJsonResponse) {
-        logLine += ` :: ${JSON.stringify(capturedJsonResponse)}`;
-      }
       if (logLine.length > 80) {
         logLine = logLine.slice(0, 79) + "\u2026";
       }
@@ -434,16 +562,27 @@ function serveLandingPage({
   appName
 }) {
   const configuredDomain = process.env.REPLIT_INTERNAL_APP_DOMAIN ?? process.env.REPLIT_DEV_DOMAIN ?? process.env.REPLIT_DOMAINS?.split(",")[0] ?? process.env.EXPO_PUBLIC_DOMAIN;
+  if (process.env.NODE_ENV === "production" && !normalizePublicHost(configuredDomain)) {
+    res.status(503).type("text/plain").send("Service unavailable");
+    return;
+  }
   const { host, origin: baseUrl } = resolvePublicOrigin(
     configuredDomain,
     req.get("host"),
     req.protocol
   );
   const expsUrl = host;
+  const cspNonce = randomBytes(18).toString("base64");
   log(`baseUrl`, baseUrl);
   log(`expsUrl`, expsUrl);
-  const html = landingPageTemplate.replace(/BASE_URL_PLACEHOLDER/g, baseUrl).replace(/EXPS_URL_PLACEHOLDER/g, expsUrl).replace(/APP_NAME_PLACEHOLDER/g, appName);
+  const html = landingPageTemplate.replace(/BASE_URL_PLACEHOLDER/g, baseUrl).replace(/EXPS_URL_PLACEHOLDER/g, expsUrl).replace(/APP_NAME_PLACEHOLDER/g, escapeHtml(appName)).replace(/CSP_NONCE_PLACEHOLDER/g, cspNonce);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
+  res.setHeader("Cache-Control", "no-store");
+  res.setHeader("X-Frame-Options", "DENY");
+  res.setHeader(
+    "Content-Security-Policy",
+    buildContentSecurityPolicy(cspNonce)
+  );
   res.status(200).send(html);
 }
 function configureExpoAndLanding(app2) {
@@ -482,18 +621,25 @@ function configureExpoAndLanding(app2) {
   log("Expo routing: Checking expo-platform header on / and /manifest");
 }
 function setupErrorHandler(app2) {
-  app2.use((err, _req, res, next) => {
+  app2.use((err, req, res, next) => {
     const error = err;
-    const status = error.status || error.statusCode || 500;
-    const message = error.message || "Internal Server Error";
-    console.error("Internal Server Error:", err);
+    const candidateStatus = error.status || error.statusCode;
+    const status = Number.isInteger(candidateStatus) && Number(candidateStatus) >= 400 && Number(candidateStatus) <= 599 ? Number(candidateStatus) : 500;
+    const message = status >= 500 ? "Internal Server Error" : error.message || "Request failed";
+    if (status >= 500) {
+      const diagnostic = err instanceof Error ? `${err.name}: ${err.message}` : "Unknown error";
+      console.error(
+        `${req.method} ${req.path} failed: ${diagnostic.replace(/[\r\n]/g, " ").slice(0, 500)}`
+      );
+    }
     if (res.headersSent) {
       return next(err);
     }
     return res.status(status).json({ message });
   });
 }
-(async () => {
+async function startServer() {
+  setupSecurityHeaders(app);
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
@@ -505,10 +651,15 @@ function setupErrorHandler(app2) {
     {
       port,
       host: "0.0.0.0",
-      reusePort: true
+      ...process.platform === "win32" ? {} : { reusePort: true }
     },
     () => {
       log(`express server serving on port ${port}`);
     }
   );
-})();
+  return server;
+}
+var serverPromise = startServer();
+export {
+  serverPromise
+};

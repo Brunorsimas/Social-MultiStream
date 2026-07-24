@@ -1,11 +1,15 @@
 import type { Request, Response } from "express";
-import { isIP } from "node:net";
-import WebSocket from "ws";
-import { ConnectionLimiter } from "./security";
+import WebSocket, { type RawData } from "ws";
+import { ConnectionLimiter, resolveClientAddress } from "./security";
 
 const PUSHER_URL =
   "wss://ws-us3.pusher.com/app/dd11c46dae0376080879?protocol=7&client=js&version=7.6.0&flash=false";
 const MAX_CONNECTION_LIFETIME_MS = 6 * 60 * 60 * 1_000;
+const MAX_PUSHER_PAYLOAD_BYTES = 256 * 1_024;
+const MAX_MESSAGE_LENGTH = 4_000;
+const MAX_USER_NAME_LENGTH = 80;
+const MAX_MESSAGE_ID_LENGTH = 200;
+const MAX_AVATAR_URL_LENGTH = 2_048;
 const kickConnectionLimiter = new ConnectionLimiter({
   maxActiveTotal: 100,
   maxActivePerKey: 10,
@@ -14,36 +18,37 @@ const kickConnectionLimiter = new ConnectionLimiter({
   windowMs: 60_000,
 });
 
-function isPrivateOrLoopback(address: string): boolean {
-  const normalized = address.toLowerCase();
-  const ipv4 = normalized.startsWith("::ffff:")
-    ? normalized.slice("::ffff:".length)
-    : normalized;
-  return (
-    normalized === "::1" ||
-    ipv4.startsWith("127.") ||
-    ipv4.startsWith("10.") ||
-    ipv4.startsWith("192.168.") ||
-    /^172\.(1[6-9]|2\d|3[01])\./.test(ipv4) ||
-    normalized.startsWith("fc") ||
-    normalized.startsWith("fd")
+function getClientKey(req: Request): string {
+  return resolveClientAddress(
+    req.socket.remoteAddress,
+    req.header("x-forwarded-for"),
   );
 }
 
-function getClientKey(req: Request): string {
-  const remoteAddress = req.socket.remoteAddress ?? "unknown";
+function boundedString(value: unknown, maxLength: number): string {
+  if (typeof value !== "string" && typeof value !== "number") return "";
+  return String(value).trim().slice(0, maxLength);
+}
 
-  if (isPrivateOrLoopback(remoteAddress)) {
-    const forwardedAddress = req
-      .header("x-forwarded-for")
-      ?.split(",")[0]
-      ?.trim();
-    if (forwardedAddress && isIP(forwardedAddress)) {
-      return forwardedAddress;
-    }
+function safeAvatarUrl(value: unknown): string | null {
+  if (typeof value !== "string" || value.length > MAX_AVATAR_URL_LENGTH) {
+    return null;
   }
+  try {
+    const url = new URL(value);
+    return url.protocol === "https:" && !url.username && !url.password
+      ? url.href
+      : null;
+  } catch {
+    return null;
+  }
+}
 
-  return remoteAddress;
+function rawDataSize(raw: RawData): number {
+  if (Array.isArray(raw)) {
+    return raw.reduce((total, item) => total + item.byteLength, 0);
+  }
+  return raw.byteLength;
 }
 
 async function getKickChatroomId(channel: string): Promise<number | null> {
@@ -60,8 +65,11 @@ async function getKickChatroomId(channel: string): Promise<number | null> {
     if (!response.ok) throw new Error(`Kick API returned HTTP ${response.status}`);
     const data = await response.json() as { chatroom?: { id?: number } };
     const id = data?.chatroom?.id;
+    if (!Number.isSafeInteger(id) || Number(id) <= 0) {
+      throw new Error("Kick API returned an invalid chatroom id");
+    }
     console.log(`[kick] Channel "${channel}" -> chatroomId: ${id}`);
-    return id ?? null;
+    return Number(id);
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[kick] Failed to get chatroom id for "${channel}": ${message}`);
@@ -95,13 +103,22 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   let closed = false;
   let pingTimer: ReturnType<typeof setInterval> | null = null;
   let ws: WebSocket | undefined;
+  let backpressured = false;
   let maxLifetimeTimer: ReturnType<typeof setTimeout>;
+
+  const handleDrain = () => {
+    backpressured = false;
+    try {
+      ws?.resume();
+    } catch {}
+  };
 
   const cleanup = () => {
     if (closed) return;
     closed = true;
     clearTimeout(maxLifetimeTimer);
     if (pingTimer) clearInterval(pingTimer);
+    res.off("drain", handleDrain);
     lease.release();
     try {
       ws?.close();
@@ -124,6 +141,7 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   });
   res.once("close", cleanup);
   res.once("finish", cleanup);
+  res.on("drain", handleDrain);
 
   const chatroomId = await getKickChatroomId(channel);
   if (closed || res.destroyed) return;
@@ -148,16 +166,31 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   });
 
   const send = (payload: object) => {
+    if (closed || res.writableEnded || res.destroyed || backpressured) {
+      return false;
+    }
     try {
-      res.write(`data: ${JSON.stringify(payload)}\n\n`);
-    } catch {}
+      const accepted = res.write(`data: ${JSON.stringify(payload)}\n\n`);
+      if (!accepted) {
+        backpressured = true;
+        try {
+          ws?.pause();
+        } catch {}
+      }
+      return accepted;
+    } catch {
+      return false;
+    }
   };
 
   send({ type: "connected", chatroomId });
   console.log(`[kick] SSE connected for "${channel}" (chatroom ${chatroomId})`);
 
   try {
-    ws = new WebSocket(PUSHER_URL);
+    ws = new WebSocket(PUSHER_URL, {
+      maxPayload: MAX_PUSHER_PAYLOAD_BYTES,
+      perMessageDeflate: false,
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[kick] WebSocket init failed: ${message}`);
@@ -167,6 +200,7 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   }
 
   ws.on("open", () => {
+    if (backpressured) ws.pause();
     console.log(`[kick] Pusher connected, subscribing to chatrooms.${chatroomId}.v2`);
     ws.send(
       JSON.stringify({
@@ -182,22 +216,30 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   });
 
   ws.on("message", (raw) => {
+    if (rawDataSize(raw) > MAX_PUSHER_PAYLOAD_BYTES) return;
     try {
       const msg = JSON.parse(raw.toString());
       if (msg.event === "App\\Events\\ChatMessageEvent") {
         const d =
           typeof msg.data === "string" ? JSON.parse(msg.data) : msg.data;
-        const content = String(d.content ?? "").trim();
+        const content = boundedString(d?.content, MAX_MESSAGE_LENGTH);
         if (!content) return;
+        const timestamp = d.created_at
+          ? new Date(d.created_at).getTime()
+          : Date.now();
         send({
           type: "message",
-          messageId: d.id ?? `${Date.now()}-${Math.random()}`,
-          userName: d.sender?.username ?? "Unknown",
-          userAvatar: d.sender?.profile_picture ?? d.sender?.profile_pic ?? null,
+          messageId:
+            boundedString(d.id, MAX_MESSAGE_ID_LENGTH) ||
+            `${Date.now()}-${Math.random()}`,
+          userName:
+            boundedString(d.sender?.username, MAX_USER_NAME_LENGTH) ||
+            "Unknown",
+          userAvatar: safeAvatarUrl(
+            d.sender?.profile_picture ?? d.sender?.profile_pic,
+          ),
           message: content,
-          timestamp: d.created_at
-            ? new Date(d.created_at).getTime()
-            : Date.now(),
+          timestamp: Number.isFinite(timestamp) ? timestamp : Date.now(),
         });
       } else if (msg.event === "pusher_internal:subscription_succeeded") {
         console.log(`[kick] Subscribed to chatrooms.${chatroomId}.v2`);

@@ -8,6 +8,10 @@ import Colors from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getCurrentEmbedDomain } from "@/lib/chat-url";
+import {
+  getWebViewOriginWhitelist,
+  isAllowedWebViewNavigation,
+} from "@/lib/webview-security";
 
 interface UnifiedChatViewProps {
   chats: ChatConfig[];
@@ -31,7 +35,7 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
 
   React.useEffect(() => {
     animatedHeight.value = withTiming(isCollapsed ? 40 : height, { duration: 250 });
-  }, [isCollapsed, height]);
+  }, [animatedHeight, isCollapsed, height]);
 
   const containerStyle = useAnimatedStyle(() => ({
     height: animatedHeight.value,
@@ -115,6 +119,8 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
               onLoad={() => setLoading(false)}
               style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
               allow="autoplay"
+              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              referrerPolicy="strict-origin-when-cross-origin"
             />
           ) : (
             <WebView
@@ -123,14 +129,17 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
               style={styles.webview}
               onLoadEnd={() => setLoading(false)}
               onError={() => { setError(true); setLoading(false); }}
+              onShouldStartLoadWithRequest={({ url }) =>
+                isAllowedWebViewNavigation(url, embedUrl, chat.platform)
+              }
               injectedJavaScript={injectedCSS}
               javaScriptEnabled
               domStorageEnabled
               allowsInlineMediaPlayback
               mediaPlaybackRequiresUserAction={false}
               startInLoadingState={false}
-              originWhitelist={["http://*", "https://*"]}
-              mixedContentMode="compatibility"
+              originWhitelist={getWebViewOriginWhitelist(embedUrl, chat.platform)}
+              mixedContentMode="never"
             />
           )}
         </View>

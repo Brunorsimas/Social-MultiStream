@@ -8,6 +8,10 @@ import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getCurrentEmbedDomain, getKickChannelName } from "@/lib/chat-url";
 import { useChats } from "@/lib/chat-context";
+import {
+  getWebViewOriginWhitelist,
+  isAllowedWebViewNavigation,
+} from "@/lib/webview-security";
 
 interface MergedChatViewProps {
   chats: ChatConfig[];
@@ -111,6 +115,8 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                     src={embedUrl}
                     style={{ width: "100%", height: "100%", border: "none", backgroundColor: themeColors.background } as any}
                     allow="autoplay"
+                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    referrerPolicy="strict-origin-when-cross-origin"
                   />
                 )}
               </View>
@@ -138,14 +144,24 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 style={styles.webview}
                 onLoadEnd={() => handleLoadEnd(chat.id)}
                 onNavigationStateChange={({ url }) => handleNavigationChange(chat, url)}
+                onShouldStartLoadWithRequest={({ url }) =>
+                  isAllowedWebViewNavigation(
+                    url,
+                    resolvedUrls[chat.id] || embedUrl,
+                    chat.platform,
+                  )
+                }
                 injectedJavaScript={injectedCSS}
                 javaScriptEnabled
                 domStorageEnabled
                 allowsInlineMediaPlayback
                 mediaPlaybackRequiresUserAction={false}
                 startInLoadingState={false}
-                originWhitelist={["http://*", "https://*"]}
-                mixedContentMode="compatibility"
+                originWhitelist={getWebViewOriginWhitelist(
+                  resolvedUrls[chat.id] || embedUrl,
+                  chat.platform,
+                )}
+                mixedContentMode="never"
               />
             </View>
           );

@@ -8,6 +8,12 @@ import * as Haptics from "expo-haptics";
 import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "@/components/PlatformBadge";
 import { useChats } from "@/lib/chat-context";
+import {
+  getWebViewOriginWhitelist,
+  isAllowedWebViewNavigation,
+  normalizeWebViewUrl,
+  shouldShareWebViewCookies,
+} from "@/lib/webview-security";
 
 const PLATFORM_LOGIN_URLS: Record<string, { url: string; label: string }> = {
   twitch: { url: "https://www.twitch.tv/login", label: "Twitch" },
@@ -28,7 +34,8 @@ export default function PlatformLoginScreen() {
   const webTopInset = Platform.OS === "web" ? 67 : 0;
 
   const platformInfo = PLATFORM_LOGIN_URLS[platform || "other"] || PLATFORM_LOGIN_URLS.other;
-  const loginUrl = platformInfo.url || chatUrl || "";
+  const loginUrl = normalizeWebViewUrl(platformInfo.url || chatUrl || "") || "";
+  const shareCookies = shouldShareWebViewCookies(loginUrl, platform || "other");
 
   const handleSkip = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -100,11 +107,14 @@ export default function PlatformLoginScreen() {
           onLoadEnd={() => setLoading(false)}
           javaScriptEnabled
           domStorageEnabled
-          thirdPartyCookiesEnabled
-          sharedCookiesEnabled
+          thirdPartyCookiesEnabled={shareCookies}
+          sharedCookiesEnabled={shareCookies}
           startInLoadingState={false}
-          originWhitelist={["http://*", "https://*"]}
-          mixedContentMode="compatibility"
+          originWhitelist={getWebViewOriginWhitelist(loginUrl, platform || "other")}
+          onShouldStartLoadWithRequest={({ url }) =>
+            isAllowedWebViewNavigation(url, loginUrl, platform || "other")
+          }
+          mixedContentMode="never"
           userAgent="Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36"
         />
       </View>

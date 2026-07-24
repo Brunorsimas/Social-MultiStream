@@ -1,8 +1,39 @@
+import { isIP } from "node:net";
+
 export type PublicOrigin = {
   host: string;
   origin: string;
   protocol: "http" | "https";
 };
+
+export function escapeHtml(value: string): string {
+  return value.replace(
+    /[&<>"']/g,
+    (character) =>
+      ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#39;",
+      })[character] ?? character,
+  );
+}
+
+export function buildContentSecurityPolicy(nonce: string): string {
+  return [
+    "default-src 'none'",
+    `script-src 'nonce-${nonce}'`,
+    `style-src 'nonce-${nonce}'`,
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "base-uri 'none'",
+    "form-action 'none'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+  ].join("; ");
+}
 
 type ParsedPublicAddress = {
   host: string;
@@ -70,6 +101,65 @@ export function resolvePublicOrigin(
     protocol,
     origin: `${protocol}://${host}`,
   };
+}
+
+export function isPrivateOrLoopbackAddress(address: string): boolean {
+  const normalized = address.toLowerCase().trim();
+  if (!normalized || normalized === "unknown") return true;
+  if (normalized.startsWith("::ffff:")) {
+    return isPrivateOrLoopbackAddress(normalized.slice("::ffff:".length));
+  }
+  if (isIP(normalized) === 4) {
+    const octets = normalized.split(".").map(Number);
+    return (
+      octets[0] === 10 ||
+      octets[0] === 127 ||
+      (octets[0] === 169 && octets[1] === 254) ||
+      (octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) ||
+      (octets[0] === 192 && octets[1] === 168) ||
+      normalized === "0.0.0.0"
+    );
+  }
+  if (isIP(normalized) === 6) {
+    return (
+      normalized === "::" ||
+      normalized === "::1" ||
+      normalized.startsWith("fc") ||
+      normalized.startsWith("fd") ||
+      normalized.startsWith("fe8") ||
+      normalized.startsWith("fe9") ||
+      normalized.startsWith("fea") ||
+      normalized.startsWith("feb")
+    );
+  }
+  return true;
+}
+
+export function resolveClientAddress(
+  remoteAddress: string | undefined,
+  forwardedFor: string | undefined,
+): string {
+  const remote = remoteAddress?.trim() || "unknown";
+  if (
+    !isPrivateOrLoopbackAddress(remote) ||
+    !forwardedFor ||
+    forwardedFor.length > 2_048
+  ) {
+    return remote;
+  }
+
+  const forwardedAddresses = forwardedFor
+    .split(",")
+    .slice(0, 20)
+    .map((address) => address.trim())
+    .filter((address) => isIP(address) !== 0);
+
+  for (let index = forwardedAddresses.length - 1; index >= 0; index -= 1) {
+    const address = forwardedAddresses[index];
+    if (!isPrivateOrLoopbackAddress(address)) return address;
+  }
+
+  return forwardedAddresses.at(-1) ?? remote;
 }
 
 export type ConnectionLimitOptions = {

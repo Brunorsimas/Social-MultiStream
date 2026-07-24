@@ -14,6 +14,9 @@ export const users = pgTable("users", {
 export const insertUserSchema = createInsertSchema(users).pick({
   username: true,
   password: true,
+}).extend({
+  username: z.string().trim().min(1).max(64),
+  password: z.string().min(12).max(1024),
 });
 
 export type InsertUser = z.infer<typeof insertUserSchema>;

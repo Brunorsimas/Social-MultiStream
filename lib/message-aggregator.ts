@@ -14,6 +14,12 @@ export interface UnifiedChatMessage {
 export const MAX_MESSAGES = 500;
 const MAX_SEEN_IDS = 5000;
 const NOTIFY_THROTTLE_MS = 150;
+const MAX_MESSAGE_ID_LENGTH = 200;
+const MAX_CHAT_ID_LENGTH = 100;
+const MAX_CHAT_NAME_LENGTH = 100;
+const MAX_USER_NAME_LENGTH = 80;
+const MAX_MESSAGE_LENGTH = 4_000;
+const MAX_AVATAR_URL_LENGTH = 2_048;
 const VALID_PLATFORMS = new Set<ChatPlatform>([
   "youtube",
   "twitch",
@@ -98,19 +104,47 @@ export class MessageAggregator {
   }
 
   private normalizeMessage(msg: UnifiedChatMessage): UnifiedChatMessage | null {
-    const messageId = String(msg.messageId ?? "").trim();
-    const chatId = String(msg.chatId ?? "").trim();
-    const message = String(msg.message ?? "").trim();
+    const messageId = String(msg.messageId ?? "")
+      .trim()
+      .slice(0, MAX_MESSAGE_ID_LENGTH);
+    const chatId = String(msg.chatId ?? "")
+      .trim()
+      .slice(0, MAX_CHAT_ID_LENGTH);
+    const message = String(msg.message ?? "")
+      .trim()
+      .slice(0, MAX_MESSAGE_LENGTH);
     if (!messageId || !chatId || !message) return null;
 
     const timestamp = Number(msg.timestamp);
+    let userAvatar: string | null = null;
+    if (
+      typeof msg.userAvatar === "string" &&
+      msg.userAvatar.length <= MAX_AVATAR_URL_LENGTH
+    ) {
+      try {
+        const avatarUrl = new URL(msg.userAvatar);
+        if (
+          avatarUrl.protocol === "https:" &&
+          !avatarUrl.username &&
+          !avatarUrl.password
+        ) {
+          userAvatar = avatarUrl.href;
+        }
+      } catch {}
+    }
+
     return {
       ...msg,
       messageId,
       chatId,
-      chatName: String(msg.chatName ?? "Chat").trim() || "Chat",
-      userName: String(msg.userName ?? "Unknown").trim() || "Unknown",
-      userAvatar: typeof msg.userAvatar === "string" && msg.userAvatar.trim() ? msg.userAvatar : null,
+      chatName:
+        String(msg.chatName ?? "Chat").trim().slice(0, MAX_CHAT_NAME_LENGTH) ||
+        "Chat",
+      userName:
+        String(msg.userName ?? "Unknown")
+          .trim()
+          .slice(0, MAX_USER_NAME_LENGTH) || "Unknown",
+      userAvatar,
       message,
       platform: VALID_PLATFORMS.has(msg.platform) ? msg.platform : "unknown",
       timestamp: Number.isFinite(timestamp) && timestamp > 0 ? timestamp : Date.now(),

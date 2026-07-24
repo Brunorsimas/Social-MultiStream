@@ -172,12 +172,6 @@ export default function UnifiedTimeline({
     scrollToEnd();
   };
 
-  const clearMessages = () => {
-    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-    globalAggregator.clear();
-    setHasNew(false);
-  };
-
   const renderItem = useCallback(
     ({ item }: { item: UnifiedChatMessage }) => (
       <MessageItem item={item} fontSize={fontSize} />
