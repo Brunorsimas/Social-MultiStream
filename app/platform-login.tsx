@@ -107,6 +107,7 @@ export default function PlatformLoginScreen() {
           onLoadEnd={() => setLoading(false)}
           javaScriptEnabled
           domStorageEnabled
+          setSupportMultipleWindows={false}
           thirdPartyCookiesEnabled={shareCookies}
           sharedCookiesEnabled={shareCookies}
           startInLoadingState={false}

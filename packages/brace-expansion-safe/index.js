@@ -2,12 +2,13 @@
 
 // Compatibility-preserving security backport based on brace-expansion 1.1.16.
 // It exposes both the legacy callable API and the v5 named `expand` API while
-// enforcing hard result-count and accumulated-output limits.
+// enforcing hard input, result-count and accumulated-output limits.
 
 var balanced = require("balanced-match");
 
 var DEFAULT_MAX_RESULTS = 100000;
 var DEFAULT_MAX_LENGTH = 4000000;
+var DEFAULT_MAX_PATTERN_LENGTH = 4096;
 
 module.exports = expandTop;
 module.exports.expand = expandTop;
@@ -70,7 +71,19 @@ function expandTop(str, options) {
   options = options || {};
   var max = boundedOption(options.max, DEFAULT_MAX_RESULTS);
   var maxLength = boundedOption(options.maxLength, DEFAULT_MAX_LENGTH);
-  if (max === 0 || maxLength === 0 || str.length > maxLength) return [];
+  var maxPatternLength = boundedOption(
+    options.maxPatternLength,
+    DEFAULT_MAX_PATTERN_LENGTH,
+  );
+  if (
+    max === 0 ||
+    maxLength === 0 ||
+    maxPatternLength === 0 ||
+    str.length > maxLength ||
+    str.length > maxPatternLength
+  ) {
+    return [];
+  }
 
   if (str.substr(0, 2) === "{}") {
     str = "\\{\\}" + str.substr(2);

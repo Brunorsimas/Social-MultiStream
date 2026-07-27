@@ -125,16 +125,42 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
   var rowSelector = [
     'yt-live-chat-text-message-renderer',
     'yt-live-chat-paid-message-renderer',
-    'yt-live-chat-membership-item-renderer'
+    'yt-live-chat-paid-sticker-renderer',
+    'yt-live-chat-membership-item-renderer',
+    'yt-live-chat-sponsorships-gift-purchase-announcement-renderer',
+    'yt-live-chat-sponsorships-gift-redemption-announcement-renderer',
+    'yt-live-chat-viewer-engagement-message-renderer'
   ].join(',');
 
   function processElement(el) {
     var userEl = el.querySelector ? el.querySelector('#author-name') : null;
-    var msgEl = el.querySelector ? el.querySelector('#message') : null;
-    if (!userEl || !msgEl) return null;
+    var messageSelectors = [
+      '#message',
+      '#header-subtext',
+      '#primary-text',
+      '#detail-text',
+      '#purchase-amount',
+      '#purchase-amount-chip'
+    ].join(',');
+    var messageNodes = el.querySelectorAll
+      ? Array.prototype.slice.call(el.querySelectorAll(messageSelectors))
+      : [];
+    var messageParts = [];
+    messageNodes.forEach(function(node) {
+      var value = node.textContent ? node.textContent.trim() : '';
+      if (value && messageParts.indexOf(value) === -1) messageParts.push(value);
+    });
+    var sticker = el.querySelector
+      ? el.querySelector('#sticker img, img[alt*="sticker" i]')
+      : null;
+    if (sticker && sticker.alt && messageParts.indexOf(sticker.alt) === -1) {
+      messageParts.push(sticker.alt);
+    }
 
-    var userName = userEl.textContent.trim();
-    var message = msgEl.textContent.trim();
+    var userName = userEl && userEl.textContent
+      ? userEl.textContent.trim()
+      : 'YouTube';
+    var message = messageParts.join(' · ').trim();
     if (!userName || !message) return null;
 
     if (processed.has(el)) return null;
@@ -421,6 +447,36 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
   var platform = ${serializedPlatform};
   var processed = new WeakSet();
   var sequence = 0;
+  var rowSelector = platform === 'facebook'
+    ? [
+        '[data-testid*="comment"]',
+        '[aria-label*="comment" i]',
+        '[aria-label*="coment" i]',
+        '[role="article"]'
+      ].join(',')
+    : platform === 'tiktok'
+      ? [
+          '[data-e2e="comment-item"]',
+          '[data-e2e*="comment-level"]',
+          '[class*="CommentItemContainer"]',
+          '[class*="DivCommentItem"]'
+        ].join(',')
+      : '[data-message-id], [class*="message"], [class*="comment"]';
+  var userSelector = [
+    '[data-e2e="comment-username-1"]',
+    '[data-e2e*="comment-username"]',
+    '[class*="username"]',
+    '[class*="UserName"]',
+    'a[role="link"] strong',
+    'strong'
+  ].join(',');
+  var messageSelector = [
+    '[data-e2e="comment-level-1"]',
+    '[data-e2e*="comment-text"]',
+    '[class*="comment-text"]',
+    '[class*="CommentText"]',
+    '[data-message-text]'
+  ].join(',');
 
   function processElement(el) {
     if (!el.querySelector) return null;
@@ -428,15 +484,31 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
     var text = el.textContent ? el.textContent.trim() : '';
     if (text.length < 3 || text.length > 500) return null;
 
-    var parts = text.split(':');
-    var userName = parts.length >= 2 ? parts[0].trim().substring(0, 30) : 'User';
-    var message = parts.length >= 2 ? parts.slice(1).join(':').trim() : text;
-    if (!message) return null;
+    var userEl = el.querySelector(userSelector);
+    var messageEl = el.querySelector(messageSelector);
+    var userName = userEl && userEl.textContent
+      ? userEl.textContent.trim().substring(0, 80)
+      : '';
+    var message = messageEl && messageEl.textContent
+      ? messageEl.textContent.trim()
+      : '';
+
+    if (!userName || !message || userName === message) {
+      var separator = text.indexOf(':');
+      if (separator < 1) return null;
+      userName = text.slice(0, separator).trim().substring(0, 80);
+      message = text.slice(separator + 1).trim();
+    }
+    if (!userName || !message) return null;
 
     if (processed.has(el)) return null;
     processed.add(el);
     var elementId = el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-message-id'));
     var id = chatId + '_gen_' + (elementId || (Date.now().toString(36) + '_' + (++sequence)));
+
+    var avatarEl = el.querySelector
+      ? el.querySelector('img[alt*="avatar" i], img[class*="avatar" i]')
+      : null;
 
     return {
       messageId: id,
@@ -444,7 +516,7 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
       chatId: chatId,
       chatName: chatName,
       userName: userName,
-      userAvatar: null,
+      userAvatar: avatarEl ? (avatarEl.src || avatarEl.getAttribute('src')) : null,
       message: message,
       timestamp: Date.now()
     };
@@ -456,8 +528,6 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
       window.ReactNativeWebView.postMessage(JSON.stringify({ type: 'chat_messages', messages: valid }));
     }
   }
-
-  var rowSelector = '[class*="message"], [class*="chat"], [class*="comment"]';
 
   function collectFrom(root) {
     if (!root || root.nodeType !== 1) return [];

@@ -29,13 +29,14 @@ test("limita quantidade e tamanho acumulado das expansoes", () => {
   const proofOfConceptStartedAt = Date.now();
   const proofOfConcept = expand("{a,b}".repeat(1_500));
   assert.ok(Date.now() - proofOfConceptStartedAt < 2_000);
+  assert.deepEqual(proofOfConcept, []);
   assert.ok(
     proofOfConcept.reduce((total, value) => total + value.length, 0) <=
       4_000_000,
   );
 
   const deepChainStartedAt = Date.now();
-  assert.doesNotThrow(() => expand("{a,b}".repeat(3_000)));
+  assert.deepEqual(expand("{a,b}".repeat(3_000)), []);
   assert.ok(Date.now() - deepChainStartedAt < 2_000);
 });
 

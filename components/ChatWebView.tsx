@@ -6,7 +6,12 @@ import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
-import { getCurrentEmbedDomain, getKickChannelName } from "@/lib/chat-url";
+import {
+  getCurrentEmbedDomain,
+  getKickChannelName,
+  getYouTubeChatRedirect,
+  isYouTubeLiveChatUrl,
+} from "@/lib/chat-url";
 import { useChats } from "@/lib/chat-context";
 import {
   getWebViewOriginWhitelist,
@@ -38,12 +43,34 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
     setError(false);
   }, [embedUrl]);
 
-  const handleNavigationChange = ({ url }: { url: string }) => {
-    if (chat.platform !== "youtube") return;
-    const resolvedUrl = getChatEmbedUrl(url);
-    if (resolvedUrl.includes("/live_chat?") && resolvedUrl !== sourceUrl) {
-      setSourceUrl(resolvedUrl);
+  const handleNavigationRequest = ({ url }: { url: string }) => {
+    if (chat.platform === "youtube") {
+      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, url);
+      if (redirectedChatUrl) {
+        setSourceUrl(redirectedChatUrl);
+        return false;
+      }
     }
+
+    return isAllowedWebViewNavigation(url, sourceUrl, chat.platform);
+  };
+
+  const handleLoadEnd = ({ nativeEvent }: { nativeEvent: { url: string } }) => {
+    if (chat.platform === "youtube") {
+      const finalUrl = nativeEvent.url || sourceUrl;
+      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, finalUrl);
+      if (redirectedChatUrl) {
+        setSourceUrl(redirectedChatUrl);
+        return;
+      }
+      if (!isYouTubeLiveChatUrl(finalUrl)) {
+        setError(true);
+        setLoading(false);
+        return;
+      }
+    }
+
+    setLoading(false);
   };
 
   const injectedCSS = `
@@ -139,21 +166,19 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
             ref={webViewRef}
             source={{ uri: sourceUrl }}
             style={styles.webview}
-            onLoadEnd={() => setLoading(false)}
+            onLoadEnd={handleLoadEnd}
             onError={() => {
               setError(true);
               setLoading(false);
             }}
-            onNavigationStateChange={handleNavigationChange}
-            onShouldStartLoadWithRequest={({ url }) =>
-              isAllowedWebViewNavigation(url, sourceUrl, chat.platform)
-            }
+            onShouldStartLoadWithRequest={handleNavigationRequest}
             injectedJavaScript={injectedCSS}
             javaScriptEnabled
             domStorageEnabled
             allowsInlineMediaPlayback
             mediaPlaybackRequiresUserAction={false}
             startInLoadingState={false}
+            setSupportMultipleWindows={false}
             originWhitelist={getWebViewOriginWhitelist(sourceUrl, chat.platform)}
             mixedContentMode="never"
           />

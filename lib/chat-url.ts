@@ -13,6 +13,7 @@ export function normalizeChatUrl(rawUrl: string, platformHint?: string): string 
     const handle = value.slice(1);
     if (platformHint === "youtube") return `https://www.youtube.com/@${handle}/live`;
     if (platformHint === "kick") return `https://kick.com/${handle}/chat`;
+    if (platformHint && platformHint !== "twitch") return null;
     return `https://www.twitch.tv/${handle}/chat`;
   }
 
@@ -153,12 +154,38 @@ export function getYouTubeChatTarget(rawUrl: string): YouTubeChatTarget | null {
     : null;
 }
 
+export function getYouTubeChatRedirect(
+  currentSourceUrl: string,
+  candidateUrl: string,
+): string | null {
+  const target = getYouTubeChatTarget(candidateUrl);
+  if (target?.type !== "video") return null;
+
+  const nextUrl = getChatEmbedUrl(candidateUrl);
+  return nextUrl !== currentSourceUrl && nextUrl.includes("/live_chat?")
+    ? nextUrl
+    : null;
+}
+
+export function isYouTubeLiveChatUrl(rawUrl: string): boolean {
+  const normalized = normalizeChatUrl(rawUrl);
+  if (!normalized || detectPlatform(normalized) !== "youtube") return false;
+
+  const url = new URL(normalized);
+  return url.pathname === "/live_chat" && getYouTubeVideoId(url) !== null;
+}
+
 export function isResolvableChatUrl(rawUrl: string, selectedPlatform?: string): boolean {
   const normalized = normalizeChatUrl(rawUrl, selectedPlatform);
   if (!normalized) return false;
   const detectedPlatform = detectPlatform(normalized);
   const platform = selectedPlatform || detectedPlatform;
-  if (["twitch", "youtube", "kick"].includes(platform) && platform !== detectedPlatform) return false;
+  if (
+    ["twitch", "youtube", "kick", "facebook", "tiktok"].includes(platform) &&
+    platform !== detectedPlatform
+  ) {
+    return false;
+  }
 
   const url = new URL(normalized);
   if (platform === "twitch") return getTwitchChannel(url) !== null;

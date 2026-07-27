@@ -24,6 +24,13 @@ export interface AppSettings {
 
 const CHATS_KEY = "@streamchat_chats";
 const SETTINGS_KEY = "@streamchat_settings";
+const KNOWN_PLATFORMS = new Set([
+  "twitch",
+  "youtube",
+  "kick",
+  "facebook",
+  "tiktok",
+]);
 
 export const defaultSettings: AppSettings = {
   layout: "columns",
@@ -48,7 +55,10 @@ function sanitizeChats(value: unknown): ChatConfig[] {
   const seenIds = new Set<string>();
   return value.flatMap((candidate, index) => {
     if (!isRecord(candidate)) return [];
-    const platformHint = typeof candidate.platform === "string" ? candidate.platform.toLowerCase() : undefined;
+    const platformHint =
+      typeof candidate.platform === "string"
+        ? candidate.platform.toLowerCase()
+        : undefined;
     const normalizedUrl = normalizeChatUrl(typeof candidate.url === "string" ? candidate.url : "", platformHint);
     if (!normalizedUrl) return [];
 
@@ -60,14 +70,15 @@ function sanitizeChats(value: unknown): ChatConfig[] {
       ? candidate.name.trim()
       : `Chat ${index + 1}`;
     const detectedPlatform = detectPlatform(normalizedUrl);
+    const platform = KNOWN_PLATFORMS.has(detectedPlatform)
+      ? detectedPlatform
+      : "other";
 
     return [{
       id,
       name,
       url: normalizedUrl,
-      platform: typeof candidate.platform === "string" && candidate.platform.trim()
-        ? candidate.platform.toLowerCase()
-        : detectedPlatform,
+      platform,
       enabled: candidate.enabled !== false,
       pinned: candidate.pinned === true,
       order: Number.isFinite(candidate.order) ? Number(candidate.order) : index,
@@ -103,12 +114,15 @@ export function createChatConfig(
 ): ChatConfig {
   const normalizedUrl = normalizeChatUrl(chat.url, chat.platform);
   if (!normalizedUrl) throw new Error("Invalid chat URL");
+  const detectedPlatform = detectPlatform(normalizedUrl);
   return {
     ...chat,
     id: generateId(),
     name: chat.name.trim(),
     url: normalizedUrl,
-    platform: chat.platform || detectPlatform(normalizedUrl),
+    platform: KNOWN_PLATFORMS.has(detectedPlatform)
+      ? detectedPlatform
+      : "other",
     order,
   };
 }

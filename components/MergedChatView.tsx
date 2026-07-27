@@ -6,7 +6,12 @@ import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
 import KickWebChat from "./KickWebChat";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
-import { getCurrentEmbedDomain, getKickChannelName } from "@/lib/chat-url";
+import {
+  getCurrentEmbedDomain,
+  getKickChannelName,
+  getYouTubeChatRedirect,
+  isYouTubeLiveChatUrl,
+} from "@/lib/chat-url";
 import { useChats } from "@/lib/chat-context";
 import {
   getWebViewOriginWhitelist,
@@ -65,16 +70,42 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
     true;
   `;
 
-  const handleLoadEnd = (chatId: string) => {
-    setLoadingStates((prev) => ({ ...prev, [chatId]: false }));
+  const handleLoadEnd = (
+    chat: ChatConfig,
+    sourceUrl: string,
+    finalUrl: string,
+  ) => {
+    if (chat.platform === "youtube") {
+      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, finalUrl);
+      if (redirectedChatUrl) {
+        setResolvedUrls((prev) => ({
+          ...prev,
+          [chat.id]: redirectedChatUrl,
+        }));
+        return;
+      }
+      if (!isYouTubeLiveChatUrl(finalUrl)) {
+        setLoadingStates((prev) => ({ ...prev, [chat.id]: false }));
+        return;
+      }
+    }
+
+    setLoadingStates((prev) => ({ ...prev, [chat.id]: false }));
   };
 
-  const handleNavigationChange = (chat: ChatConfig, url: string) => {
-    if (chat.platform !== "youtube") return;
-    const resolvedUrl = getChatEmbedUrl(url);
-    if (resolvedUrl.includes("/live_chat?") && resolvedUrls[chat.id] !== resolvedUrl) {
-      setResolvedUrls((prev) => ({ ...prev, [chat.id]: resolvedUrl }));
+  const handleNavigationRequest = (chat: ChatConfig, sourceUrl: string, url: string) => {
+    if (chat.platform === "youtube") {
+      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, url);
+      if (redirectedChatUrl) {
+        setResolvedUrls((prev) => ({
+          ...prev,
+          [chat.id]: redirectedChatUrl,
+        }));
+        return false;
+      }
     }
+
+    return isAllowedWebViewNavigation(url, sourceUrl, chat.platform);
   };
 
   return (
@@ -102,6 +133,10 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
           const kickChannel = chat.platform === "kick" ? getKickChannelName(chat.url) : null;
           const isVisible = index === safeIndex;
 
+          if (Platform.OS !== "web" && !isVisible) {
+            return null;
+          }
+
           if (Platform.OS === "web") {
             return (
               <View
@@ -128,7 +163,6 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
               key={chat.id}
               style={[
                 styles.webViewWrapper,
-                !isVisible && styles.hiddenView,
               ]}
               pointerEvents={isVisible ? "auto" : "none"}
             >
@@ -142,13 +176,18 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 ref={(ref) => { webViewRefs.current[chat.id] = ref; }}
                 source={{ uri: resolvedUrls[chat.id] || embedUrl }}
                 style={styles.webview}
-                onLoadEnd={() => handleLoadEnd(chat.id)}
-                onNavigationStateChange={({ url }) => handleNavigationChange(chat, url)}
-                onShouldStartLoadWithRequest={({ url }) =>
-                  isAllowedWebViewNavigation(
-                    url,
+                onLoadEnd={({ nativeEvent }) =>
+                  handleLoadEnd(
+                    chat,
                     resolvedUrls[chat.id] || embedUrl,
-                    chat.platform,
+                    nativeEvent.url,
+                  )
+                }
+                onShouldStartLoadWithRequest={({ url }) =>
+                  handleNavigationRequest(
+                    chat,
+                    resolvedUrls[chat.id] || embedUrl,
+                    url,
                   )
                 }
                 injectedJavaScript={injectedCSS}
@@ -157,6 +196,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 allowsInlineMediaPlayback
                 mediaPlaybackRequiresUserAction={false}
                 startInLoadingState={false}
+                setSupportMultipleWindows={false}
                 originWhitelist={getWebViewOriginWhitelist(
                   resolvedUrls[chat.id] || embedUrl,
                   chat.platform,
@@ -230,10 +270,6 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
   },
   webViewWrapper: {
     ...StyleSheet.absoluteFillObject,
-  },
-  hiddenView: {
-    opacity: 0,
-    zIndex: -1,
   },
   webview: {
     flex: 1,

@@ -2,8 +2,10 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  getYouTubeChatRedirect,
   getTwitchChannelName,
   getYouTubeChatTarget,
+  isYouTubeLiveChatUrl,
 } from "../lib/chat-url.ts";
 import { getWebChatEndpoint } from "../lib/web-chat-endpoint.ts";
 import { parseTwitchPrivmsg } from "../server/twitch-chat.ts";
@@ -57,6 +59,32 @@ test("extracts validated Twitch and YouTube targets", () => {
   assert.deepEqual(
     getYouTubeChatTarget("https://www.youtube.com/@example/live"),
     { type: "handle", value: "example" },
+  );
+});
+
+test("redirects a YouTube channel live page to the embedded live chat", () => {
+  const channelUrl = "https://www.youtube.com/@example/live?dark_theme=1";
+  const watchUrl = "https://www.youtube.com/watch?v=abc123XYZ_-";
+  assert.equal(
+    getYouTubeChatRedirect(channelUrl, watchUrl),
+    "https://www.youtube.com/live_chat?v=abc123XYZ_-&dark_theme=1&is_popout=1",
+  );
+  assert.equal(
+    getYouTubeChatRedirect(
+      "https://www.youtube.com/live_chat?v=abc123XYZ_-&dark_theme=1&is_popout=1",
+      "intent://watch?v=abc123XYZ_-",
+    ),
+    null,
+  );
+  assert.equal(
+    isYouTubeLiveChatUrl(
+      "https://www.youtube.com/live_chat?v=abc123XYZ_-&is_popout=1",
+    ),
+    true,
+  );
+  assert.equal(
+    isYouTubeLiveChatUrl("https://www.youtube.com/@example/live"),
+    false,
   );
 });
 

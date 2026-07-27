@@ -1,4 +1,10 @@
-import React, { useRef, useCallback, useMemo, useEffect } from "react";
+import React, {
+  useRef,
+  useCallback,
+  useMemo,
+  useEffect,
+  useState,
+} from "react";
 import { View, StyleSheet, Platform } from "react-native";
 import { WebView } from "react-native-webview";
 import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
@@ -6,6 +12,10 @@ import { getKickSocketInterceptor, getScraperForPlatform } from "@/lib/chat-scra
 import { globalAggregator } from "@/lib/message-aggregator";
 import { getApiUrl } from "@/lib/api-url";
 import { getWebChatEndpoint } from "@/lib/web-chat-endpoint";
+import {
+  getYouTubeChatRedirect,
+  isYouTubeLiveChatUrl,
+} from "@/lib/chat-url";
 import {
   getWebViewOriginWhitelist,
   isAllowedWebViewNavigation,
@@ -165,10 +175,15 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
   const webViewRef = useRef<WebView>(null);
   const loadHadErrorRef = useRef(false);
   const embedUrl = getChatEmbedUrl(chat.url);
+  const [sourceUrl, setSourceUrl] = useState(embedUrl);
   const isKick = chat.platform === "kick";
-  const shareCookies = shouldShareWebViewCookies(embedUrl, chat.platform);
+  const shareCookies = shouldShareWebViewCookies(sourceUrl, chat.platform);
 
   useWebChatSSE(chat, onStatusChange);
+
+  useEffect(() => {
+    setSourceUrl(embedUrl);
+  }, [embedUrl]);
 
   const injectedJS = useMemo(() => {
     const scraperScript = getScraperForPlatform(chat.platform, chat.id, chat.name);
@@ -191,7 +206,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
     (event: any) => {
       const messages = normalizeCollectorEvent(
         event?.nativeEvent?.data,
-        embedUrl,
+        sourceUrl,
         event?.nativeEvent?.url,
         chat,
       );
@@ -200,7 +215,22 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
         globalAggregator.addMessages(messages);
       }
     },
-    [chat, embedUrl, onStatusChange]
+    [chat, sourceUrl, onStatusChange]
+  );
+
+  const handleNavigationRequest = useCallback(
+    ({ url }: { url: string }) => {
+      if (chat.platform === "youtube") {
+        const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, url);
+        if (redirectedChatUrl) {
+          setSourceUrl(redirectedChatUrl);
+          return false;
+        }
+      }
+
+      return isAllowedWebViewNavigation(url, sourceUrl, chat.platform);
+    },
+    [chat.platform, sourceUrl],
   );
 
   if (Platform.OS === "web") {
@@ -215,17 +245,42 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
     >
       <WebView
         ref={webViewRef}
-        source={{ uri: embedUrl }}
+        source={{ uri: sourceUrl }}
         style={styles.collectorWebView}
         onMessage={handleMessage}
         onLoadStart={() => {
           loadHadErrorRef.current = false;
           onStatusChange?.(chat.id, "connecting");
         }}
-        onLoadEnd={() => {
-          if (!loadHadErrorRef.current) {
-            onStatusChange?.(chat.id, "connected");
+        onLoadEnd={({ nativeEvent }) => {
+          if (loadHadErrorRef.current) return;
+
+          if (chat.platform === "youtube") {
+            const finalUrl = nativeEvent.url || sourceUrl;
+            const redirectedChatUrl = getYouTubeChatRedirect(
+              sourceUrl,
+              finalUrl,
+            );
+            if (redirectedChatUrl) {
+              setSourceUrl(redirectedChatUrl);
+              onStatusChange?.(
+                chat.id,
+                "connecting",
+                "Opening the live chat",
+              );
+              return;
+            }
+            if (!isYouTubeLiveChatUrl(finalUrl)) {
+              onStatusChange?.(
+                chat.id,
+                "error",
+                "No active YouTube live chat was found for this channel",
+              );
+              return;
+            }
           }
+
+          onStatusChange?.(chat.id, "connected");
         }}
         onError={() => {
           loadHadErrorRef.current = true;
@@ -247,16 +302,13 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
           thirdPartyCookiesEnabled: true,
           sharedCookiesEnabled: true,
         } : {})}
-        {...(isKick ? {
-          setSupportMultipleWindows: false,
-        } : {})}
+        setSupportMultipleWindows={false}
+        androidLayerType="software"
         allowsInlineMediaPlayback
         mediaPlaybackRequiresUserAction={false}
         startInLoadingState={false}
-        originWhitelist={getWebViewOriginWhitelist(embedUrl, chat.platform)}
-        onShouldStartLoadWithRequest={({ url }) =>
-          isAllowedWebViewNavigation(url, embedUrl, chat.platform)
-        }
+        originWhitelist={getWebViewOriginWhitelist(sourceUrl, chat.platform)}
+        onShouldStartLoadWithRequest={handleNavigationRequest}
         mixedContentMode="never"
       />
     </View>
@@ -275,12 +327,12 @@ const styles = StyleSheet.create({
   },
   collectorContainer: {
     position: "absolute",
-    left: 0,
-    top: 0,
+    left: -10_000,
+    top: -10_000,
     width: 420,
     height: 800,
-    opacity: 0.01,
     overflow: "hidden",
+    zIndex: -1,
   },
   collectorWebView: {
     width: 420,

@@ -59,6 +59,11 @@ test("normalizes chat paths and @handles using the selected platform", () => {
   assert.equal(normalizeChatUrl("@gaules", "twitch"), "https://www.twitch.tv/gaules/chat");
   assert.equal(normalizeChatUrl("@gaules", "kick"), "https://kick.com/gaules/chat");
   assert.equal(normalizeChatUrl("@creator", "youtube"), "https://www.youtube.com/@creator/live");
+  assert.equal(normalizeChatUrl("@creator", "tiktok"), null);
+  assert.equal(
+    isResolvableChatUrl("https://www.twitch.tv/creator/chat", "tiktok"),
+    false,
+  );
   assert.equal(normalizeChatUrl("kick.com/@gaules/chat"), "https://kick.com/gaules/chat");
   assert.equal(normalizeChatUrl("twitch.tv/@gaules/chat"), "https://www.twitch.tv/gaules/chat");
   assert.equal(
@@ -94,6 +99,7 @@ test("builds a resilient Kick collector without changing other platform scrapers
   assert.match(youtubeScript, /subtree: true/);
   assert.match(youtubeScript, /setInterval\(scanDocument, 3000\)/);
   assert.match(youtubeScript, /yt-live-chat-membership-item-renderer/);
+  assert.match(youtubeScript, /yt-live-chat-paid-sticker-renderer/);
 });
 
 test("forwards Kick websocket messages to the unified collector", () => {
