@@ -16,14 +16,32 @@ import {
 interface HiddenChatCollectorProps {
   chat: ChatConfig;
   fontSize?: number;
+  onStatusChange?: (
+    chatId: string,
+    status: CollectorStatus,
+    detail?: string,
+  ) => void;
 }
 
-function useKickSSE(chat: ChatConfig) {
+export type CollectorStatus =
+  | "connecting"
+  | "connected"
+  | "receiving"
+  | "unsupported"
+  | "error";
+
+function useKickSSE(
+  chat: ChatConfig,
+  onStatusChange?: HiddenChatCollectorProps["onStatusChange"],
+) {
   useEffect(() => {
     if (Platform.OS !== "web" || chat.platform !== "kick") return;
 
     const channel = getKickChannelName(chat.url);
-    if (!channel) return;
+    if (!channel) {
+      onStatusChange?.(chat.id, "error", "Invalid Kick channel");
+      return;
+    }
 
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -42,14 +60,20 @@ function useKickSSE(chat: ChatConfig) {
         retryTimer = null;
       }
       es?.close();
+      onStatusChange?.(chat.id, "connecting");
       try {
         const base = getApiUrl().replace(/\/$/, "");
         es = new EventSource(`${base}/api/kick/chat/${channel}`);
+
+        es.onopen = () => {
+          if (active) onStatusChange?.(chat.id, "connected");
+        };
 
         es.onmessage = (e) => {
           try {
             const data = JSON.parse(e.data);
             if (data.type === "message" && data.message) {
+              onStatusChange?.(chat.id, "receiving");
               globalAggregator.addMessage({
                 messageId: `${chat.id}_kk_${data.messageId}`,
                 platform: "kick",
@@ -63,10 +87,24 @@ function useKickSSE(chat: ChatConfig) {
             } else if (data.type === "disconnected") {
               es?.close();
               if (active) {
+                onStatusChange?.(chat.id, "connecting", "Reconnecting");
                 scheduleReconnect(3000);
               }
             } else if (data.type === "error") {
               es?.close();
+              onStatusChange?.(
+                chat.id,
+                "error",
+                typeof data.message === "string"
+                  ? data.message
+                  : "Kick chat unavailable",
+              );
+              scheduleReconnect(15_000);
+            } else if (
+              data.type === "connected" ||
+              data.type === "subscribed"
+            ) {
+              onStatusChange?.(chat.id, "connected");
             }
           } catch {}
         };
@@ -74,10 +112,12 @@ function useKickSSE(chat: ChatConfig) {
         es.onerror = () => {
           es?.close();
           if (active) {
+            onStatusChange?.(chat.id, "error", "Connection interrupted");
             scheduleReconnect(5000);
           }
         };
       } catch {
+        onStatusChange?.(chat.id, "error", "Unable to open connection");
         scheduleReconnect(5000);
       }
     }
@@ -89,19 +129,37 @@ function useKickSSE(chat: ChatConfig) {
       if (retryTimer) clearTimeout(retryTimer);
       es?.close();
     };
-  }, [chat.id, chat.url, chat.platform, chat.name]);
+  }, [
+    chat.id,
+    chat.url,
+    chat.platform,
+    chat.name,
+    onStatusChange,
+  ]);
 }
 
 const HiddenChatCollector = React.memo(function HiddenChatCollector({
   chat,
   fontSize = 14,
+  onStatusChange,
 }: HiddenChatCollectorProps) {
   const webViewRef = useRef<WebView>(null);
+  const loadHadErrorRef = useRef(false);
   const embedUrl = getChatEmbedUrl(chat.url);
   const isKick = chat.platform === "kick";
   const shareCookies = shouldShareWebViewCookies(embedUrl, chat.platform);
 
-  useKickSSE(chat);
+  useKickSSE(chat, onStatusChange);
+
+  useEffect(() => {
+    if (Platform.OS === "web" && chat.platform !== "kick") {
+      onStatusChange?.(
+        chat.id,
+        "unsupported",
+        "Web collection is currently available for Kick",
+      );
+    }
+  }, [chat.id, chat.platform, onStatusChange]);
 
   const injectedJS = useMemo(() => {
     const scraperScript = getScraperForPlatform(chat.platform, chat.id, chat.name);
@@ -129,10 +187,11 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
         chat,
       );
       if (messages.length > 0) {
+        onStatusChange?.(chat.id, "receiving");
         globalAggregator.addMessages(messages);
       }
     },
-    [chat, embedUrl]
+    [chat, embedUrl, onStatusChange]
   );
 
   if (Platform.OS === "web") {
@@ -143,13 +202,34 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
     <View
       collapsable={false}
       pointerEvents="none"
-      style={isKick ? styles.kickCollectorContainer : styles.hiddenContainer}
+      style={styles.collectorContainer}
     >
       <WebView
         ref={webViewRef}
         source={{ uri: embedUrl }}
-        style={isKick ? styles.kickCollectorWebView : styles.hiddenWebView}
+        style={styles.collectorWebView}
         onMessage={handleMessage}
+        onLoadStart={() => {
+          loadHadErrorRef.current = false;
+          onStatusChange?.(chat.id, "connecting");
+        }}
+        onLoadEnd={() => {
+          if (!loadHadErrorRef.current) {
+            onStatusChange?.(chat.id, "connected");
+          }
+        }}
+        onError={() => {
+          loadHadErrorRef.current = true;
+          onStatusChange?.(chat.id, "error", "Unable to load chat")
+        }}
+        onHttpError={({ nativeEvent }) => {
+          loadHadErrorRef.current = true;
+          onStatusChange?.(
+            chat.id,
+            "error",
+            `Chat returned HTTP ${nativeEvent.statusCode}`,
+          )
+        }}
         injectedJavaScriptBeforeContentLoaded={injectedBeforeLoad}
         injectedJavaScript={injectedJS}
         javaScriptEnabled
@@ -184,21 +264,16 @@ const styles = StyleSheet.create({
     position: "absolute",
     opacity: 0,
   },
-  hiddenWebView: {
-    width: 1,
-    height: 1,
-    opacity: 0,
-  },
-  kickCollectorContainer: {
+  collectorContainer: {
     position: "absolute",
     left: 0,
     top: 0,
     width: 420,
     height: 800,
-    opacity: 0,
+    opacity: 0.01,
     overflow: "hidden",
   },
-  kickCollectorWebView: {
+  collectorWebView: {
     width: 420,
     height: 800,
   },

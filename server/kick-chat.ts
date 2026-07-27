@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import WebSocket, { type RawData } from "ws";
 import { ConnectionLimiter, resolveClientAddress } from "./security";
+import { bindSseLifecycle } from "./sse-lifecycle";
 
 const PUSHER_URL =
   "wss://ws-us3.pusher.com/app/dd11c46dae0376080879?protocol=7&client=js&version=7.6.0&flash=false";
@@ -135,12 +136,10 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
     }
   ).unref?.();
 
-  req.once("close", () => {
+  bindSseLifecycle(req, res, () => {
     console.log(`[kick] Client disconnected from SSE for "${channel}"`);
     cleanup();
   });
-  res.once("close", cleanup);
-  res.once("finish", cleanup);
   res.on("drain", handleDrain);
 
   const chatroomId = await getKickChatroomId(channel);

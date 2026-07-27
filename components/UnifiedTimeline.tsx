@@ -11,7 +11,9 @@ import {
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
 import { ThemeColors } from "@/constants/colors";
-import HiddenChatCollector from "./HiddenChatCollector";
+import HiddenChatCollector, {
+  CollectorStatus,
+} from "./HiddenChatCollector";
 import { ChatConfig } from "@/lib/storage";
 import { globalAggregator, UnifiedChatMessage } from "@/lib/message-aggregator";
 import { useChats } from "@/lib/chat-context";
@@ -22,6 +24,11 @@ interface UnifiedTimelineProps {
   onFontSizeChange?: (delta: number) => void;
   onToggleFullscreen?: () => void;
   isFullscreen?: boolean;
+}
+
+interface CollectorState {
+  status: CollectorStatus;
+  detail?: string;
 }
 
 const PLATFORM_LABEL: Record<string, string> = {
@@ -115,6 +122,9 @@ export default function UnifiedTimeline({
   const [messages, setMessages] = useState<UnifiedChatMessage[]>([]);
   const [paused, setPaused] = useState(false);
   const [hasNew, setHasNew] = useState(false);
+  const [collectorStates, setCollectorStates] = useState<
+    Record<string, CollectorState>
+  >({});
   const flatListRef = useRef<FlatList>(null);
   const pausedRef = useRef(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -153,6 +163,24 @@ export default function UnifiedTimeline({
     if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
   }, []);
 
+  useEffect(() => {
+    setCollectorStates((current) => Object.fromEntries(
+      Object.entries(current).filter(([chatId]) => activeChatIds.has(chatId)),
+    ));
+  }, [activeChatIds]);
+
+  const handleCollectorStatus = useCallback(
+    (chatId: string, status: CollectorStatus, detail?: string) => {
+      setCollectorStates((current) => {
+        const previous = current[chatId];
+        if (previous?.status === status && previous.detail === detail) {
+          return current;
+        }
+        return { ...current, [chatId]: { status, detail } };
+      });
+    },
+    [],
+  );
 
   const togglePause = () => {
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
@@ -188,18 +216,44 @@ export default function UnifiedTimeline({
   const collectibleCount = Platform.OS === "web"
     ? chats.filter((chat) => chat.platform === "kick").length
     : totalConnected;
+  const connectedCount = Object.values(collectorStates).filter(
+    ({ status }) => status === "connected" || status === "receiving",
+  ).length;
+  const collectorErrors = Object.values(collectorStates).filter(
+    ({ status }) => status === "error",
+  );
+  const emptyDescription = collectorErrors.length > 0
+    ? collectorErrors[0].detail ||
+      "A chat source could not connect. It will retry automatically."
+    : Platform.OS === "web" && collectibleCount < chats.length
+      ? collectibleCount === 0
+        ? "On the web, Unified Mode currently collects Kick chats. Use the Android app for embedded chats from other platforms."
+        : "Kick messages are collected on the web. Use the Android app to also collect embedded chats from other platforms."
+      : connectedCount > 0
+        ? "Sources are connected. New messages will appear here in real time."
+        : `Connecting to ${chats.length} active chat${chats.length !== 1 ? "s" : ""}...`;
 
   return (
     <View style={styles.container}>
       {chats.map((chat) => (
-        <HiddenChatCollector key={chat.id} chat={chat} fontSize={fontSize} />
+        <HiddenChatCollector
+          key={chat.id}
+          chat={chat}
+          fontSize={fontSize}
+          onStatusChange={handleCollectorStatus}
+        />
       ))}
 
       <View style={styles.topBar}>
-        <View style={styles.liveDot} />
+        <View
+          style={[
+            styles.liveDot,
+            connectedCount === 0 && { backgroundColor: themeColors.warning },
+          ]}
+        />
         <Text style={styles.liveText}>Live</Text>
         <Text style={styles.connectedText}>
-          {" "}• {collectibleCount} {collectibleCount === 1 ? "Source" : "Sources"}
+          {" "}• {connectedCount}/{collectibleCount} connected
         </Text>
       </View>
 
@@ -208,9 +262,7 @@ export default function UnifiedTimeline({
           <Ionicons name="radio-outline" size={40} color={themeColors.textMuted} />
           <Text style={styles.emptyTitle}>Waiting for messages...</Text>
           <Text style={styles.emptyDesc}>
-            {Platform.OS === "web" && collectibleCount < chats.length
-              ? "On the web, unified collection is available for Kick. Open the Android app to collect embedded chats from other platforms."
-              : `Messages from ${chats.length} active chat${chats.length !== 1 ? "s" : ""} will appear here in real time.`}
+            {emptyDescription}
           </Text>
         </View>
       ) : (

@@ -1,17 +1,13 @@
-import React, { useRef, useState } from "react";
-import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, useWindowDimensions } from "react-native";
-import { WebView } from "react-native-webview";
+import React, { useMemo, useState } from "react";
+import { View, Text, Pressable, StyleSheet, ScrollView, useWindowDimensions } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import Animated, { useAnimatedStyle, useSharedValue, withTiming } from "react-native-reanimated";
 import * as Haptics from "expo-haptics";
-import Colors from "@/constants/colors";
+import { ThemeColors } from "@/constants/colors";
 import PlatformBadge from "./PlatformBadge";
-import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
-import { getCurrentEmbedDomain } from "@/lib/chat-url";
-import {
-  getWebViewOriginWhitelist,
-  isAllowedWebViewNavigation,
-} from "@/lib/webview-security";
+import ChatWebView from "./ChatWebView";
+import { ChatConfig } from "@/lib/storage";
+import { useChats } from "@/lib/chat-context";
 
 interface UnifiedChatViewProps {
   chats: ChatConfig[];
@@ -27,10 +23,9 @@ interface UnifiedChatPanelProps {
 }
 
 function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollapse }: UnifiedChatPanelProps) {
-  const webViewRef = useRef<WebView>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(false);
-  const embedUrl = getChatEmbedUrl(chat.url, Platform.OS === "web" ? getCurrentEmbedDomain() : undefined);
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
+  const [reloadKey, setReloadKey] = useState(0);
   const animatedHeight = useSharedValue(isCollapsed ? 40 : height);
 
   React.useEffect(() => {
@@ -41,107 +36,56 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
     height: animatedHeight.value,
   }));
 
-  const injectedCSS = `
-    (function() {
-      var style = document.createElement('style');
-      style.textContent = 'body { font-size: ${fontSize}px !important; background: #0A0A0F !important; } * { font-size: inherit; }';
-      document.head.appendChild(style);
-    })();
-    true;
-  `;
-
   const platformColors: Record<string, string> = {
-    twitch: Colors.dark.twitch,
-    youtube: Colors.dark.youtube,
-    kick: Colors.dark.kick,
-    facebook: Colors.dark.facebook,
-    tiktok: Colors.dark.tiktok,
-    other: Colors.dark.primary,
+    twitch: themeColors.twitch,
+    youtube: themeColors.youtube,
+    kick: themeColors.kick,
+    facebook: themeColors.facebook,
+    tiktok: themeColors.tiktok,
+    other: themeColors.primary,
   };
 
-  const accentColor = platformColors[chat.platform] || Colors.dark.primary;
+  const accentColor = platformColors[chat.platform] || themeColors.primary;
 
   return (
     <Animated.View style={[styles.panel, containerStyle, { borderLeftColor: accentColor }]}>
-      <Pressable
-        onPress={() => {
-          Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-          onToggleCollapse();
-        }}
-        style={styles.panelHeader}
-      >
-        <PlatformBadge platform={chat.platform} size={12} />
-        <Text style={styles.panelName} numberOfLines={1}>{chat.name}</Text>
-        {chat.pinned && <Ionicons name="pin" size={11} color={Colors.dark.warning} />}
-        <View style={styles.panelSpacer} />
+      <View style={styles.panelHeader}>
         <Pressable
           onPress={() => {
-            webViewRef.current?.reload();
+            Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+            onToggleCollapse();
           }}
+          style={styles.collapseTarget}
+        >
+          <PlatformBadge platform={chat.platform} size={12} />
+          <Text style={styles.panelName} numberOfLines={1}>{chat.name}</Text>
+          {chat.pinned && <Ionicons name="pin" size={11} color={themeColors.warning} />}
+          <View style={styles.panelSpacer} />
+          <Ionicons
+            name={isCollapsed ? "chevron-down" : "chevron-up"}
+            size={14}
+            color={themeColors.textMuted}
+          />
+        </Pressable>
+        <Pressable
+          onPress={() => setReloadKey((key) => key + 1)}
           hitSlop={8}
           style={styles.panelAction}
+          accessibilityRole="button"
+          accessibilityLabel={`Reload ${chat.name}`}
         >
-          <Ionicons name="refresh" size={13} color={Colors.dark.textMuted} />
+          <Ionicons name="refresh" size={13} color={themeColors.textMuted} />
         </Pressable>
-        <Ionicons
-          name={isCollapsed ? "chevron-down" : "chevron-up"}
-          size={14}
-          color={Colors.dark.textMuted}
-        />
-      </Pressable>
+      </View>
 
       {!isCollapsed && (
         <View style={styles.panelContent}>
-          {loading && (
-            <View style={styles.loadingOverlay}>
-              <ActivityIndicator size="small" color={accentColor} />
-              <Text style={styles.loadingText}>Loading {chat.name}...</Text>
-            </View>
-          )}
-          {error ? (
-            <View style={styles.errorContainer}>
-              <Ionicons name="cloud-offline" size={24} color={Colors.dark.textMuted} />
-              <Text style={styles.errorText}>Unable to load</Text>
-              <Pressable
-                onPress={() => {
-                  setError(false);
-                  setLoading(true);
-                  webViewRef.current?.reload();
-                }}
-                style={styles.retryBtn}
-              >
-                <Ionicons name="refresh" size={14} color={accentColor} />
-              </Pressable>
-            </View>
-          ) : Platform.OS === "web" ? (
-            <iframe
-              src={embedUrl}
-              onLoad={() => setLoading(false)}
-              style={{ width: "100%", height: "100%", border: "none", backgroundColor: "#0A0A0F" } as any}
-              allow="autoplay"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
-              referrerPolicy="strict-origin-when-cross-origin"
-            />
-          ) : (
-            <WebView
-              ref={webViewRef}
-              source={{ uri: embedUrl }}
-              style={styles.webview}
-              onLoadEnd={() => setLoading(false)}
-              onError={() => { setError(true); setLoading(false); }}
-              onShouldStartLoadWithRequest={({ url }) =>
-                isAllowedWebViewNavigation(url, embedUrl, chat.platform)
-              }
-              injectedJavaScript={injectedCSS}
-              javaScriptEnabled
-              domStorageEnabled
-              allowsInlineMediaPlayback
-              mediaPlaybackRequiresUserAction={false}
-              startInLoadingState={false}
-              originWhitelist={getWebViewOriginWhitelist(embedUrl, chat.platform)}
-              mixedContentMode="never"
-            />
-          )}
+          <ChatWebView
+            key={reloadKey}
+            chat={chat}
+            fontSize={fontSize}
+            showHeader={false}
+          />
         </View>
       )}
     </Animated.View>
@@ -149,13 +93,15 @@ function UnifiedChatPanel({ chat, fontSize, height, isCollapsed, onToggleCollaps
 }
 
 export default function UnifiedChatView({ chats, fontSize = 14 }: UnifiedChatViewProps) {
+  const { themeColors } = useChats();
+  const styles = useMemo(() => createStyles(themeColors), [themeColors]);
   const [collapsedIds, setCollapsedIds] = useState<Set<string>>(new Set());
   const { height: screenHeight } = useWindowDimensions();
 
   const expandedCount = chats.filter((c) => !collapsedIds.has(c.id)).length;
   const collapsedCount = chats.length - expandedCount;
   const availableHeight = screenHeight - 120 - (collapsedCount * 40);
-  const panelHeight = expandedCount > 0 ? Math.max(150, availableHeight / expandedCount) : 200;
+  const panelHeight = expandedCount > 0 ? Math.max(220, availableHeight / expandedCount) : 220;
 
   const toggleCollapse = (id: string) => {
     setCollapsedIds((prev) => {
@@ -181,7 +127,7 @@ export default function UnifiedChatView({ chats, fontSize = 14 }: UnifiedChatVie
   return (
     <View style={styles.container}>
       <View style={styles.unifiedHeader}>
-        <Ionicons name="layers" size={16} color={Colors.dark.primary} />
+        <Ionicons name="layers" size={16} color={themeColors.primary} />
         <Text style={styles.unifiedTitle}>Unified View</Text>
         <Text style={styles.unifiedCount}>{chats.length} chats</Text>
         <View style={styles.panelSpacer} />
@@ -189,11 +135,15 @@ export default function UnifiedChatView({ chats, fontSize = 14 }: UnifiedChatVie
           <Ionicons
             name={collapsedIds.size === chats.length ? "expand" : "contract"}
             size={16}
-            color={Colors.dark.textSecondary}
+            color={themeColors.textSecondary}
           />
         </Pressable>
       </View>
-      <View style={styles.panelsList}>
+      <ScrollView
+        style={styles.panelsList}
+        contentContainerStyle={styles.panelsContent}
+        showsVerticalScrollIndicator={false}
+      >
         {chats.map((chat) => (
           <UnifiedChatPanel
             key={chat.id}
@@ -204,12 +154,12 @@ export default function UnifiedChatView({ chats, fontSize = 14 }: UnifiedChatVie
             onToggleCollapse={() => toggleCollapse(chat.id)}
           />
         ))}
-      </View>
+      </ScrollView>
     </View>
   );
 }
 
-const styles = StyleSheet.create({
+const createStyles = (colors: ThemeColors) => StyleSheet.create({
   container: {
     flex: 1,
   },
@@ -219,22 +169,22 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 12,
     paddingVertical: 10,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     borderRadius: 10,
     marginBottom: 8,
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
   },
   unifiedTitle: {
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
   },
   unifiedCount: {
     fontSize: 11,
     fontFamily: "Inter_400Regular",
-    color: Colors.dark.textMuted,
-    backgroundColor: Colors.dark.background,
+    color: colors.textMuted,
+    backgroundColor: colors.background,
     paddingHorizontal: 8,
     paddingVertical: 2,
     borderRadius: 10,
@@ -249,29 +199,38 @@ const styles = StyleSheet.create({
   },
   panelsList: {
     flex: 1,
+  },
+  panelsContent: {
     gap: 4,
+    paddingBottom: 8,
   },
   panel: {
-    backgroundColor: Colors.dark.surface,
+    backgroundColor: colors.surface,
     borderRadius: 10,
     overflow: "hidden",
     borderWidth: 1,
-    borderColor: Colors.dark.borderLight,
+    borderColor: colors.borderLight,
     borderLeftWidth: 3,
   },
   panelHeader: {
     flexDirection: "row",
     alignItems: "center",
-    gap: 8,
     paddingHorizontal: 10,
-    paddingVertical: 8,
-    backgroundColor: Colors.dark.surfaceElevated,
+    backgroundColor: colors.surfaceElevated,
     minHeight: 38,
+  },
+  collapseTarget: {
+    flex: 1,
+    minHeight: 38,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: 8,
+    paddingVertical: 8,
   },
   panelName: {
     fontSize: 12,
     fontFamily: "Inter_600SemiBold",
-    color: Colors.dark.text,
+    color: colors.text,
     maxWidth: 150,
   },
   panelSpacer: {
@@ -285,42 +244,6 @@ const styles = StyleSheet.create({
   },
   panelContent: {
     flex: 1,
-    backgroundColor: Colors.dark.background,
-  },
-  webview: {
-    flex: 1,
-    backgroundColor: "transparent",
-  },
-  loadingOverlay: {
-    ...StyleSheet.absoluteFillObject,
-    alignItems: "center",
-    justifyContent: "center",
-    backgroundColor: Colors.dark.background,
-    gap: 6,
-    zIndex: 10,
-  },
-  loadingText: {
-    color: Colors.dark.textMuted,
-    fontSize: 11,
-    fontFamily: "Inter_400Regular",
-  },
-  errorContainer: {
-    flex: 1,
-    alignItems: "center",
-    justifyContent: "center",
-    gap: 6,
-  },
-  errorText: {
-    color: Colors.dark.textMuted,
-    fontSize: 12,
-    fontFamily: "Inter_400Regular",
-  },
-  retryBtn: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: Colors.dark.surfaceElevated,
-    alignItems: "center",
-    justifyContent: "center",
+    backgroundColor: colors.background,
   },
 });

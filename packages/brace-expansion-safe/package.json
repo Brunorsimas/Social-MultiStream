@@ -1,0 +1,15 @@
+{
+  "name": "@social-multichat/brace-expansion-safe",
+  "version": "1.0.0",
+  "description": "Compatibility-preserving, resource-bounded brace expansion",
+  "main": "index.js",
+  "exports": {
+    ".": "./index.js",
+    "./package.json": "./package.json"
+  },
+  "dependencies": {
+    "balanced-match": "^1.0.0"
+  },
+  "license": "MIT",
+  "private": true
+}

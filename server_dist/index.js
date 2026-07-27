@@ -197,6 +197,19 @@ var ConnectionLimiter = class {
   }
 };
 
+// server/sse-lifecycle.ts
+function bindSseLifecycle(req, res, onDisconnect) {
+  let disconnected = false;
+  const disconnectOnce = () => {
+    if (disconnected) return;
+    disconnected = true;
+    onDisconnect();
+  };
+  req.once("aborted", disconnectOnce);
+  res.once("close", disconnectOnce);
+  res.once("finish", disconnectOnce);
+}
+
 // server/kick-chat.ts
 var PUSHER_URL = "wss://ws-us3.pusher.com/app/dd11c46dae0376080879?protocol=7&client=js&version=7.6.0&flash=false";
 var MAX_CONNECTION_LIFETIME_MS = 6 * 60 * 60 * 1e3;
@@ -310,12 +323,10 @@ async function kickChatSSE(req, res) {
     if (!res.writableEnded) res.end();
   }, MAX_CONNECTION_LIFETIME_MS);
   maxLifetimeTimer.unref?.();
-  req.once("close", () => {
+  bindSseLifecycle(req, res, () => {
     console.log(`[kick] Client disconnected from SSE for "${channel}"`);
     cleanup();
   });
-  res.once("close", cleanup);
-  res.once("finish", cleanup);
   res.on("drain", handleDrain);
   const chatroomId = await getKickChatroomId(channel);
   if (closed || res.destroyed) return;

@@ -10,6 +10,12 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
   var chatName = ${serializedChatName};
   var processed = new WeakSet();
   var sequence = 0;
+  var rowSelector = [
+    '[class*="chat-line__message"]',
+    '.chat-line__message',
+    '[data-a-target="chat-line-message"]',
+    '[class*="ChatLine"]'
+  ].join(',');
 
   function processElement(el) {
     var userEl = el.querySelector
@@ -60,39 +66,45 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
     }
   }
 
-  function initialScan() {
-    var items = document.querySelectorAll('[class*="chat-line__message"], .chat-line__message, [data-a-target="chat-line-message"]');
-    if (!items.length) items = document.querySelectorAll('[class*="ChatLine"]');
+  function collectFrom(root) {
+    if (!root || root.nodeType !== 1) return [];
+    var items = [];
+    if (root.matches && root.matches(rowSelector)) items.push(root);
+    if (root.querySelectorAll) {
+      root.querySelectorAll(rowSelector).forEach(function(item) { items.push(item); });
+    }
     var msgs = [];
     items.forEach(function(el) { msgs.push(processElement(el)); });
-    sendMessages(msgs);
+    return msgs;
+  }
+
+  function scanDocument() {
+    if (document.body) sendMessages(collectFrom(document.body));
   }
 
   function setupObserver() {
-    var container = document.querySelector('[class*="chat-scrollable-area"], .chat-scrollable-area__message-container, [role="log"]');
-    if (!container) return false;
-
+    if (!document.body) return false;
     var observer = new MutationObserver(function(mutations) {
       var msgs = [];
       mutations.forEach(function(mutation) {
         mutation.addedNodes.forEach(function(node) {
-          if (node.nodeType !== 1) return;
-          msgs.push(processElement(node));
+          collectFrom(node).forEach(function(message) { msgs.push(message); });
         });
       });
       sendMessages(msgs);
     });
-    observer.observe(container, { childList: true, subtree: false });
+    observer.observe(document.body, { childList: true, subtree: true });
     return true;
   }
 
-  initialScan();
-  if (!setupObserver()) {
-    var retries = 0;
-    var interval = setInterval(function() {
-      if (setupObserver() || ++retries > 10) clearInterval(interval);
-    }, 1000);
+  function start() {
+    scanDocument();
+    setupObserver();
+    setInterval(scanDocument, 3000);
   }
+
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start, { once: true });
 })();
 true;
 `;
@@ -110,6 +122,11 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
   var chatName = ${serializedChatName};
   var processed = new WeakSet();
   var sequence = 0;
+  var rowSelector = [
+    'yt-live-chat-text-message-renderer',
+    'yt-live-chat-paid-message-renderer',
+    'yt-live-chat-membership-item-renderer'
+  ].join(',');
 
   function processElement(el) {
     var userEl = el.querySelector ? el.querySelector('#author-name') : null;
@@ -145,38 +162,45 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
     }
   }
 
-  function initialScan() {
-    var items = document.querySelectorAll('yt-live-chat-text-message-renderer, yt-live-chat-paid-message-renderer');
+  function collectFrom(root) {
+    if (!root || root.nodeType !== 1) return [];
+    var items = [];
+    if (root.matches && root.matches(rowSelector)) items.push(root);
+    if (root.querySelectorAll) {
+      root.querySelectorAll(rowSelector).forEach(function(item) { items.push(item); });
+    }
     var msgs = [];
     items.forEach(function(el) { msgs.push(processElement(el)); });
-    sendMessages(msgs);
+    return msgs;
+  }
+
+  function scanDocument() {
+    if (document.body) sendMessages(collectFrom(document.body));
   }
 
   function setupObserver() {
-    var container = document.querySelector('yt-live-chat-item-list-renderer #items, #chat-messages #items, #items');
-    if (!container) return false;
-
+    if (!document.body) return false;
     var observer = new MutationObserver(function(mutations) {
       var msgs = [];
       mutations.forEach(function(mutation) {
         mutation.addedNodes.forEach(function(node) {
-          if (node.nodeType !== 1) return;
-          msgs.push(processElement(node));
+          collectFrom(node).forEach(function(message) { msgs.push(message); });
         });
       });
       sendMessages(msgs);
     });
-    observer.observe(container, { childList: true, subtree: false });
+    observer.observe(document.body, { childList: true, subtree: true });
     return true;
   }
 
-  initialScan();
-  if (!setupObserver()) {
-    var retries = 0;
-    var interval = setInterval(function() {
-      if (setupObserver() || ++retries > 10) clearInterval(interval);
-    }, 1000);
+  function start() {
+    scanDocument();
+    setupObserver();
+    setInterval(scanDocument, 3000);
   }
+
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start, { once: true });
 })();
 true;
 `;

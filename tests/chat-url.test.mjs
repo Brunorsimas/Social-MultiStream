@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import { detectPlatform, getChatEmbedUrl, getKickChannelName, isResolvableChatUrl, normalizeChatUrl } from "../lib/chat-url.ts";
-import { getKickScraper, getKickSocketInterceptor, getTwitchScraper } from "../lib/chat-scrapers.ts";
+import {
+  getKickScraper,
+  getKickSocketInterceptor,
+  getTwitchScraper,
+  getYouTubeScraper,
+} from "../lib/chat-scrapers.ts";
 
 test("normalizes safe URLs and rejects active or credentialed URLs", () => {
   assert.equal(normalizeChatUrl("twitch.tv/example"), "https://www.twitch.tv/example/chat");
@@ -71,15 +76,24 @@ test("serializes user-provided chat metadata safely in scraper scripts", () => {
 test("builds a resilient Kick collector without changing other platform scrapers", () => {
   const domScript = getKickScraper("kick-1", "Kick Chat");
   const socketScript = getKickSocketInterceptor("kick-1", "Kick Chat");
+  const twitchScript = getTwitchScraper("twitch-1", "Twitch Chat");
+  const youtubeScript = getYouTubeScraper("youtube-1", "YouTube Chat");
 
   assert.doesNotThrow(() => new Function(domScript));
   assert.doesNotThrow(() => new Function(socketScript));
+  assert.doesNotThrow(() => new Function(twitchScript));
+  assert.doesNotThrow(() => new Function(youtubeScript));
   assert.match(domScript, /subtree: true/);
   assert.match(domScript, /setInterval\(scanDocument, 3000\)/);
   assert.match(domScript, /data-testid="chat-message"/);
   assert.match(socketScript, /ChatMessage\(\?:Sent\)\?Event/);
   assert.match(socketScript, /window\.WebSocket = StreamChatWebSocket/);
   assert.match(socketScript, /type: 'chat_messages'/);
+  assert.match(twitchScript, /subtree: true/);
+  assert.match(twitchScript, /setInterval\(scanDocument, 3000\)/);
+  assert.match(youtubeScript, /subtree: true/);
+  assert.match(youtubeScript, /setInterval\(scanDocument, 3000\)/);
+  assert.match(youtubeScript, /yt-live-chat-membership-item-renderer/);
 });
 
 test("forwards Kick websocket messages to the unified collector", () => {
