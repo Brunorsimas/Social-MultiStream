@@ -79,4 +79,4 @@ ensurePreviewReachable = "/status"
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 120000
+timeoutMs = 300000

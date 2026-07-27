@@ -5,6 +5,21 @@ const { Readable } = require("stream");
 const { pipeline } = require("stream/promises");
 
 let metroProcess = null;
+const configuredMetroPort = Number.parseInt(
+  process.env.EXPO_METRO_PORT || "8081",
+  10,
+);
+
+if (
+  !Number.isInteger(configuredMetroPort) ||
+  configuredMetroPort < 1 ||
+  configuredMetroPort > 65535
+) {
+  console.error("ERROR: EXPO_METRO_PORT must be a valid TCP port");
+  process.exit(1);
+}
+
+const metroBaseUrl = `http://localhost:${configuredMetroPort}`;
 
 function exitWithError(message) {
   console.error(message);
@@ -96,10 +111,11 @@ function clearMetroCache() {
 
 async function checkMetroHealth() {
   try {
-    const response = await fetch("http://localhost:8081/status", {
+    const response = await fetch(`${metroBaseUrl}/status`, {
       signal: AbortSignal.timeout(5000),
     });
-    return response.ok;
+    if (!response.ok) return false;
+    return (await response.text()).trim() === "packager-status:running";
   } catch {
     return false;
   }
@@ -118,11 +134,22 @@ async function startMetro(expoPublicDomain) {
     ...process.env,
     EXPO_PUBLIC_DOMAIN: expoPublicDomain,
   };
-  metroProcess = spawn("npm", ["run", "expo:start:static:build"], {
-    stdio: ["ignore", "pipe", "pipe"],
-    detached: false,
-    env,
-  });
+  const npmExecutable = process.platform === "win32" ? "npm.cmd" : "npm";
+  metroProcess = spawn(
+    npmExecutable,
+    [
+      "run",
+      "expo:start:static:build",
+      "--",
+      "--port",
+      String(configuredMetroPort),
+    ],
+    {
+      stdio: ["ignore", "pipe", "pipe"],
+      detached: false,
+      env,
+    },
+  );
 
   if (metroProcess.stdout) {
     metroProcess.stdout.on("data", (data) => {
@@ -189,7 +216,9 @@ async function downloadFile(url, outputPath) {
 
 async function downloadBundle(platform, timestamp) {
   // For expo-router apps, the entry is node_modules/expo-router/entry
-  const url = new URL("http://localhost:8081/node_modules/expo-router/entry.bundle");
+  const url = new URL(
+    `${metroBaseUrl}/node_modules/expo-router/entry.bundle`,
+  );
   url.searchParams.set("platform", platform);
   url.searchParams.set("dev", "false");
   url.searchParams.set("hot", "false");
@@ -217,7 +246,7 @@ async function downloadManifest(platform) {
 
   try {
     console.log(`Fetching ${platform} manifest...`);
-    const response = await fetch("http://localhost:8081/manifest", {
+    const response = await fetch(`${metroBaseUrl}/manifest`, {
       headers: { "expo-platform": platform },
       signal: controller.signal,
     });
@@ -320,7 +349,7 @@ function extractAssets(timestamp) {
       const originalPath = match[1];
       const filename = match[3] + "." + match[4];
 
-      const tempUrl = new URL(`http://localhost:8081${originalPath}`);
+      const tempUrl = new URL(`${metroBaseUrl}${originalPath}`);
       const unstablePath = tempUrl.searchParams.get("unstable_path");
 
       if (!unstablePath) {
@@ -364,7 +393,7 @@ async function downloadAssets(assets, timestamp) {
   const downloadPromises = assets.map(async (asset) => {
     const platform = Array.from(asset.platforms)[0];
 
-    const tempUrl = new URL(`http://localhost:8081${asset.originalPath}`);
+    const tempUrl = new URL(`${metroBaseUrl}${asset.originalPath}`);
     const unstablePath = tempUrl.searchParams.get("unstable_path");
 
     if (!unstablePath) {
@@ -373,7 +402,7 @@ async function downloadAssets(assets, timestamp) {
 
     const decodedPath = decodeURIComponent(unstablePath);
     const metroUrl = new URL(
-      `http://localhost:8081${path.posix.join("/assets", decodedPath, asset.filename)}`,
+      `${metroBaseUrl}${path.posix.join("/assets", decodedPath, asset.filename)}`,
     );
     metroUrl.searchParams.set("platform", platform);
     metroUrl.searchParams.set("hash", asset.hash);
@@ -432,7 +461,7 @@ function updateBundleUrls(timestamp, baseUrl) {
     bundle = bundle.replace(
       /httpServerLocation:"(\/[^"]+)"/g,
       (_match, capturedPath) => {
-        const tempUrl = new URL(`http://localhost:8081${capturedPath}`);
+        const tempUrl = new URL(`${metroBaseUrl}${capturedPath}`);
         const unstablePath = tempUrl.searchParams.get("unstable_path");
 
         if (!unstablePath) {
