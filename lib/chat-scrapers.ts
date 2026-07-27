@@ -457,11 +457,22 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
     }
   }
 
-  function initialScan() {
-    var candidates = document.querySelectorAll('[class*="message"], [class*="chat"], [class*="comment"]');
+  var rowSelector = '[class*="message"], [class*="chat"], [class*="comment"]';
+
+  function collectFrom(root) {
+    if (!root || root.nodeType !== 1) return [];
+    var candidates = [];
+    if (root.matches && root.matches(rowSelector)) candidates.push(root);
+    if (root.querySelectorAll) {
+      root.querySelectorAll(rowSelector).forEach(function(item) { candidates.push(item); });
+    }
     var msgs = [];
     candidates.forEach(function(el) { msgs.push(processElement(el)); });
-    sendMessages(msgs);
+    return msgs;
+  }
+
+  function scanDocument() {
+    if (document.body) sendMessages(collectFrom(document.body));
   }
 
   function setupObserver() {
@@ -472,8 +483,7 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
       var msgs = [];
       mutations.forEach(function(mutation) {
         mutation.addedNodes.forEach(function(node) {
-          if (node.nodeType !== 1) return;
-          msgs.push(processElement(node));
+          collectFrom(node).forEach(function(message) { msgs.push(message); });
         });
       });
       sendMessages(msgs);
@@ -482,8 +492,14 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
     return true;
   }
 
-  setTimeout(initialScan, 2000);
-  setupObserver();
+  function start() {
+    scanDocument();
+    setupObserver();
+    setInterval(scanDocument, 3000);
+  }
+
+  if (document.body) start();
+  else document.addEventListener('DOMContentLoaded', start, { once: true });
 })();
 true;
 `;

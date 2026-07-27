@@ -106,6 +106,12 @@ function getTwitchChannel(url: URL): string | null {
   return /^[a-z\d_]{1,25}$/i.test(first) ? first : null;
 }
 
+export function getTwitchChannelName(rawUrl: string): string | null {
+  const normalized = normalizeChatUrl(rawUrl);
+  if (!normalized || detectPlatform(normalized) !== "twitch") return null;
+  return getTwitchChannel(new URL(normalized));
+}
+
 function getYouTubeVideoId(url: URL): string | null {
   let candidate: string | null = null;
   if (isHost(url.hostname, "youtu.be")) candidate = firstPathSegment(url);
@@ -122,6 +128,29 @@ function getYouTubeVideoId(url: URL): string | null {
   }
 
   return candidate && /^[a-z\d_-]{6,20}$/i.test(candidate) ? candidate : null;
+}
+
+export type YouTubeChatTarget =
+  | { type: "video"; value: string }
+  | { type: "handle"; value: string };
+
+export function getYouTubeChatTarget(rawUrl: string): YouTubeChatTarget | null {
+  const normalized = normalizeChatUrl(rawUrl);
+  if (!normalized || detectPlatform(normalized) !== "youtube") return null;
+
+  const url = new URL(normalized);
+  const parts = url.pathname.split("/").filter(Boolean);
+  if (
+    parts[0]?.startsWith("@") &&
+    /^[a-z\d_.-]{1,40}$/i.test(parts[0].slice(1))
+  ) {
+    return { type: "handle", value: parts[0].slice(1) };
+  }
+
+  const videoId = getYouTubeVideoId(url);
+  return videoId && videoId !== "__yt_handle_live__"
+    ? { type: "video", value: videoId }
+    : null;
 }
 
 export function isResolvableChatUrl(rawUrl: string, selectedPlatform?: string): boolean {

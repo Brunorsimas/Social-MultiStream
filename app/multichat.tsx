@@ -8,7 +8,6 @@ import * as Haptics from "expo-haptics";
 import Animated, { FadeIn, FadeOut } from "react-native-reanimated";
 import ChatWebView from "@/components/ChatWebView";
 import MergedChatView from "@/components/MergedChatView";
-import UnifiedChatView from "@/components/UnifiedChatView";
 import UnifiedTimeline from "@/components/UnifiedTimeline";
 import { useChats } from "@/lib/chat-context";
 
@@ -111,10 +110,6 @@ export default function MultiChatScreen() {
     }
 
     if (unifiedMode) {
-      if (Platform.OS === "web") {
-        return <UnifiedChatView chats={activeChats} fontSize={fontSize} />;
-      }
-
       return (
         <UnifiedTimeline
           chats={activeChats}

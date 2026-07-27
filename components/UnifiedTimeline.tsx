@@ -7,6 +7,7 @@ import {
   StyleSheet,
   Platform,
   Image,
+  Alert,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import * as Haptics from "expo-haptics";
@@ -125,6 +126,7 @@ export default function UnifiedTimeline({
   const [collectorStates, setCollectorStates] = useState<
     Record<string, CollectorState>
   >({});
+  const [collectorGeneration, setCollectorGeneration] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const pausedRef = useRef(false);
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -200,6 +202,30 @@ export default function UnifiedTimeline({
     scrollToEnd();
   };
 
+  const restartCollectors = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    setCollectorStates({});
+    setCollectorGeneration((generation) => generation + 1);
+  }, []);
+
+  const clearMessages = useCallback(() => {
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
+    globalAggregator.clear();
+    setHasNew(false);
+  }, []);
+
+  const openTimelineActions = useCallback(() => {
+    Alert.alert("Unified chat", "Choose an action", [
+      { text: "Cancel", style: "cancel" },
+      { text: "Restart sources", onPress: restartCollectors },
+      {
+        text: "Clear timeline",
+        style: "destructive",
+        onPress: clearMessages,
+      },
+    ]);
+  }, [clearMessages, restartCollectors]);
+
   const renderItem = useCallback(
     ({ item }: { item: UnifiedChatMessage }) => (
       <MessageItem item={item} fontSize={fontSize} />
@@ -214,21 +240,30 @@ export default function UnifiedTimeline({
 
   const totalConnected = chats.length;
   const collectibleCount = Platform.OS === "web"
-    ? chats.filter((chat) => chat.platform === "kick").length
+    ? chats.filter((chat) =>
+        chat.platform === "kick" ||
+        chat.platform === "twitch" ||
+        chat.platform === "youtube"
+      ).length
     : totalConnected;
   const connectedCount = Object.values(collectorStates).filter(
     ({ status }) => status === "connected" || status === "receiving",
   ).length;
+  const sourceCountLabel =
+    collectibleCount > 0 && connectedCount === collectibleCount
+      ? `${connectedCount} ${connectedCount === 1 ? "Source" : "Sources"}`
+      : `${connectedCount}/${collectibleCount} Sources`;
   const collectorErrors = Object.values(collectorStates).filter(
     ({ status }) => status === "error",
   );
+  const unsupportedCount = Object.values(collectorStates).filter(
+    ({ status }) => status === "unsupported",
+  ).length;
   const emptyDescription = collectorErrors.length > 0
     ? collectorErrors[0].detail ||
       "A chat source could not connect. It will retry automatically."
-    : Platform.OS === "web" && collectibleCount < chats.length
-      ? collectibleCount === 0
-        ? "On the web, Unified Mode currently collects Kick chats. Use the Android app for embedded chats from other platforms."
-        : "Kick messages are collected on the web. Use the Android app to also collect embedded chats from other platforms."
+    : unsupportedCount > 0
+      ? `${unsupportedCount} source${unsupportedCount === 1 ? "" : "s"} require an official platform API on the web.`
       : connectedCount > 0
         ? "Sources are connected. New messages will appear here in real time."
         : `Connecting to ${chats.length} active chat${chats.length !== 1 ? "s" : ""}...`;
@@ -237,7 +272,7 @@ export default function UnifiedTimeline({
     <View style={styles.container}>
       {chats.map((chat) => (
         <HiddenChatCollector
-          key={chat.id}
+          key={`${chat.id}:${collectorGeneration}`}
           chat={chat}
           fontSize={fontSize}
           onStatusChange={handleCollectorStatus}
@@ -253,7 +288,7 @@ export default function UnifiedTimeline({
         />
         <Text style={styles.liveText}>Live</Text>
         <Text style={styles.connectedText}>
-          {" "}• {connectedCount}/{collectibleCount} connected
+          {" "}• {sourceCountLabel}
         </Text>
       </View>
 
@@ -291,6 +326,36 @@ export default function UnifiedTimeline({
           </Text>
         </Pressable>
       )}
+
+      <View style={styles.sourceActions}>
+        <Pressable
+          onPress={restartCollectors}
+          hitSlop={8}
+          style={styles.sourceActionBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Restart chat sources"
+        >
+          <Ionicons
+            name="refresh"
+            size={24}
+            color={themeColors.textSecondary}
+          />
+        </Pressable>
+        <View style={styles.sourceActionDivider} />
+        <Pressable
+          onPress={openTimelineActions}
+          hitSlop={8}
+          style={styles.sourceActionBtn}
+          accessibilityRole="button"
+          accessibilityLabel="Unified chat actions"
+        >
+          <Ionicons
+            name="ellipsis-horizontal"
+            size={24}
+            color={themeColors.textSecondary}
+          />
+        </Pressable>
+      </View>
 
       <View style={styles.bottomBar}>
         <Pressable onPress={togglePause} hitSlop={10} style={styles.barBtn}>
@@ -486,6 +551,34 @@ const createStyles = (colors: ThemeColors) => StyleSheet.create({
     fontSize: 13,
     fontFamily: "Inter_600SemiBold",
     color: "#fff",
+  },
+
+  sourceActions: {
+    position: "absolute",
+    right: 14,
+    bottom: 92,
+    width: 54,
+    borderRadius: 27,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surfaceElevated,
+    overflow: "hidden",
+    shadowColor: "#000",
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.25,
+    shadowRadius: 6,
+    elevation: 5,
+  },
+  sourceActionBtn: {
+    width: 54,
+    height: 52,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  sourceActionDivider: {
+    height: StyleSheet.hairlineWidth,
+    backgroundColor: colors.border,
+    marginHorizontal: 10,
   },
 
   bottomBar: {

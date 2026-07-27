@@ -52,30 +52,77 @@ function rawDataSize(raw: RawData): number {
   return raw.byteLength;
 }
 
-async function getKickChatroomId(channel: string): Promise<number | null> {
+type KickChatroomLookup =
+  | { id: number; reason: null }
+  | { id: null; reason: "blocked" | "not_found" | "unavailable" };
+
+function getConfiguredKickChatroomId(channel: string): number | null {
+  const raw = process.env.KICK_CHATROOM_IDS;
+  if (!raw || raw.length > 10_000) return null;
+
   try {
-    const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}`, {
-      headers: {
-        Accept: "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://kick.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36",
-      },
-      signal: AbortSignal.timeout(10_000),
-    });
-    if (!response.ok) throw new Error(`Kick API returned HTTP ${response.status}`);
-    const data = await response.json() as { chatroom?: { id?: number } };
-    const id = data?.chatroom?.id;
-    if (!Number.isSafeInteger(id) || Number(id) <= 0) {
-      throw new Error("Kick API returned an invalid chatroom id");
-    }
-    console.log(`[kick] Channel "${channel}" -> chatroomId: ${id}`);
-    return Number(id);
-  } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[kick] Failed to get chatroom id for "${channel}": ${message}`);
+    const mapping = JSON.parse(raw) as Record<string, unknown>;
+    const value = mapping[channel.toLowerCase()];
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+      ? value
+      : null;
+  } catch {
     return null;
   }
+}
+
+async function getKickChatroomId(channel: string): Promise<KickChatroomLookup> {
+  const configuredId = getConfiguredKickChatroomId(channel);
+  if (configuredId) return { id: configuredId, reason: null };
+
+  const slug = encodeURIComponent(channel);
+  const endpoints = [
+    `https://kick.com/api/v2/channels/${slug}/chatroom`,
+    `https://kick.com/api/v2/channels/${slug}`,
+  ];
+  let blocked = false;
+  let notFound = false;
+
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: {
+          Accept: "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: "https://kick.com/",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36",
+        },
+        signal: AbortSignal.timeout(10_000),
+      });
+
+      if (response.status === 401 || response.status === 403) {
+        blocked = true;
+        continue;
+      }
+      if (response.status === 404) {
+        notFound = true;
+        continue;
+      }
+      if (!response.ok) continue;
+
+      const data = (await response.json()) as {
+        id?: number;
+        chatroom?: { id?: number };
+      };
+      const id = data.id ?? data.chatroom?.id;
+      if (typeof id === "number" && Number.isSafeInteger(id) && id > 0) {
+        console.log(`[kick] Channel "${channel}" -> chatroomId: ${id}`);
+        return { id, reason: null };
+      }
+    } catch {
+      // Tenta o endpoint alternativo.
+    }
+  }
+
+  if (blocked) return { id: null, reason: "blocked" };
+  if (notFound) return { id: null, reason: "not_found" };
+  return { id: null, reason: "unavailable" };
 }
 
 export async function kickChatSSE(req: Request, res: Response): Promise<void> {
@@ -142,20 +189,27 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   });
   res.on("drain", handleDrain);
 
-  const chatroomId = await getKickChatroomId(channel);
+  const chatroom = await getKickChatroomId(channel);
   if (closed || res.destroyed) return;
 
-  if (!chatroomId) {
+  if (!chatroom.id) {
+    const message =
+      chatroom.reason === "blocked"
+        ? "O Kick bloqueou a consulta pública deste servidor. Configure KICK_CHATROOM_IDS ou tente novamente em outra rede."
+        : chatroom.reason === "not_found"
+          ? `Canal "${channel}" não encontrado no Kick`
+          : "Não foi possível consultar o chat do Kick neste momento.";
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
-    res.write(`data: ${JSON.stringify({ type: "error", message: `Canal "${channel}" não encontrado no Kick` })}\n\n`);
+    res.write(`data: ${JSON.stringify({ type: "error", message })}\n\n`);
     res.end();
     return;
   }
+  const chatroomId = chatroom.id;
 
   res.writeHead(200, {
     "Content-Type": "text/event-stream",

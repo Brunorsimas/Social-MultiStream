@@ -5,7 +5,7 @@ import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getKickSocketInterceptor, getScraperForPlatform } from "@/lib/chat-scrapers";
 import { globalAggregator } from "@/lib/message-aggregator";
 import { getApiUrl } from "@/lib/api-url";
-import { getKickChannelName } from "@/lib/chat-url";
+import { getWebChatEndpoint } from "@/lib/web-chat-endpoint";
 import {
   getWebViewOriginWhitelist,
   isAllowedWebViewNavigation,
@@ -30,16 +30,23 @@ export type CollectorStatus =
   | "unsupported"
   | "error";
 
-function useKickSSE(
+function useWebChatSSE(
   chat: ChatConfig,
   onStatusChange?: HiddenChatCollectorProps["onStatusChange"],
 ) {
   useEffect(() => {
-    if (Platform.OS !== "web" || chat.platform !== "kick") return;
+    if (Platform.OS !== "web") return;
 
-    const channel = getKickChannelName(chat.url);
-    if (!channel) {
-      onStatusChange?.(chat.id, "error", "Invalid Kick channel");
+    const endpoint = getWebChatEndpoint({
+      platform: chat.platform,
+      url: chat.url,
+    });
+    if (!endpoint) {
+      onStatusChange?.(
+        chat.id,
+        "unsupported",
+        "This platform requires an official chat API integration on the web",
+      );
       return;
     }
 
@@ -63,10 +70,16 @@ function useKickSSE(
       onStatusChange?.(chat.id, "connecting");
       try {
         const base = getApiUrl().replace(/\/$/, "");
-        es = new EventSource(`${base}/api/kick/chat/${channel}`);
+        es = new EventSource(`${base}${endpoint}`);
 
         es.onopen = () => {
-          if (active) onStatusChange?.(chat.id, "connected");
+          if (active) {
+            onStatusChange?.(
+              chat.id,
+              "connecting",
+              "Waiting for the platform",
+            );
+          }
         };
 
         es.onmessage = (e) => {
@@ -74,9 +87,15 @@ function useKickSSE(
             const data = JSON.parse(e.data);
             if (data.type === "message" && data.message) {
               onStatusChange?.(chat.id, "receiving");
+              const platform =
+                chat.platform === "kick" ||
+                chat.platform === "twitch" ||
+                chat.platform === "youtube"
+                  ? chat.platform
+                  : "unknown";
               globalAggregator.addMessage({
-                messageId: `${chat.id}_kk_${data.messageId}`,
-                platform: "kick",
+                messageId: `${chat.id}_${platform}_${data.messageId}`,
+                platform,
                 chatId: chat.id,
                 chatName: chat.name,
                 userName: data.userName || "Unknown",
@@ -97,7 +116,7 @@ function useKickSSE(
                 "error",
                 typeof data.message === "string"
                   ? data.message
-                  : "Kick chat unavailable",
+                  : "Chat unavailable",
               );
               scheduleReconnect(15_000);
             } else if (
@@ -149,17 +168,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
   const isKick = chat.platform === "kick";
   const shareCookies = shouldShareWebViewCookies(embedUrl, chat.platform);
 
-  useKickSSE(chat, onStatusChange);
-
-  useEffect(() => {
-    if (Platform.OS === "web" && chat.platform !== "kick") {
-      onStatusChange?.(
-        chat.id,
-        "unsupported",
-        "Web collection is currently available for Kick",
-      );
-    }
-  }, [chat.id, chat.platform, onStatusChange]);
+  useWebChatSSE(chat, onStatusChange);
 
   const injectedJS = useMemo(() => {
     const scraperScript = getScraperForPlatform(chat.platform, chat.id, chat.name);

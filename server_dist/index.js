@@ -252,30 +252,59 @@ function rawDataSize(raw) {
   }
   return raw.byteLength;
 }
-async function getKickChatroomId(channel) {
+function getConfiguredKickChatroomId(channel) {
+  const raw = process.env.KICK_CHATROOM_IDS;
+  if (!raw || raw.length > 1e4) return null;
   try {
-    const response = await fetch(`https://kick.com/api/v2/channels/${encodeURIComponent(channel)}`, {
-      headers: {
-        Accept: "application/json",
-        "Accept-Language": "en-US,en;q=0.9",
-        Referer: "https://kick.com/",
-        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124 Safari/537.36"
-      },
-      signal: AbortSignal.timeout(1e4)
-    });
-    if (!response.ok) throw new Error(`Kick API returned HTTP ${response.status}`);
-    const data = await response.json();
-    const id = data?.chatroom?.id;
-    if (!Number.isSafeInteger(id) || Number(id) <= 0) {
-      throw new Error("Kick API returned an invalid chatroom id");
-    }
-    console.log(`[kick] Channel "${channel}" -> chatroomId: ${id}`);
-    return Number(id);
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    console.error(`[kick] Failed to get chatroom id for "${channel}": ${message}`);
+    const mapping = JSON.parse(raw);
+    const value = mapping[channel.toLowerCase()];
+    return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : null;
+  } catch {
     return null;
   }
+}
+async function getKickChatroomId(channel) {
+  const configuredId = getConfiguredKickChatroomId(channel);
+  if (configuredId) return { id: configuredId, reason: null };
+  const slug = encodeURIComponent(channel);
+  const endpoints = [
+    `https://kick.com/api/v2/channels/${slug}/chatroom`,
+    `https://kick.com/api/v2/channels/${slug}`
+  ];
+  let blocked = false;
+  let notFound = false;
+  for (const endpoint of endpoints) {
+    try {
+      const response = await fetch(endpoint, {
+        headers: {
+          Accept: "application/json",
+          "Accept-Language": "en-US,en;q=0.9",
+          Referer: "https://kick.com/",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+        },
+        signal: AbortSignal.timeout(1e4)
+      });
+      if (response.status === 401 || response.status === 403) {
+        blocked = true;
+        continue;
+      }
+      if (response.status === 404) {
+        notFound = true;
+        continue;
+      }
+      if (!response.ok) continue;
+      const data = await response.json();
+      const id = data.id ?? data.chatroom?.id;
+      if (typeof id === "number" && Number.isSafeInteger(id) && id > 0) {
+        console.log(`[kick] Channel "${channel}" -> chatroomId: ${id}`);
+        return { id, reason: null };
+      }
+    } catch {
+    }
+  }
+  if (blocked) return { id: null, reason: "blocked" };
+  if (notFound) return { id: null, reason: "not_found" };
+  return { id: null, reason: "unavailable" };
 }
 async function kickChatSSE(req, res) {
   const channelParam = req.params.channel;
@@ -328,21 +357,23 @@ async function kickChatSSE(req, res) {
     cleanup();
   });
   res.on("drain", handleDrain);
-  const chatroomId = await getKickChatroomId(channel);
+  const chatroom = await getKickChatroomId(channel);
   if (closed || res.destroyed) return;
-  if (!chatroomId) {
+  if (!chatroom.id) {
+    const message = chatroom.reason === "blocked" ? "O Kick bloqueou a consulta p\xFAblica deste servidor. Configure KICK_CHATROOM_IDS ou tente novamente em outra rede." : chatroom.reason === "not_found" ? `Canal "${channel}" n\xE3o encontrado no Kick` : "N\xE3o foi poss\xEDvel consultar o chat do Kick neste momento.";
     res.writeHead(200, {
       "Content-Type": "text/event-stream",
       "Cache-Control": "no-cache, no-transform",
       Connection: "keep-alive",
       "X-Accel-Buffering": "no"
     });
-    res.write(`data: ${JSON.stringify({ type: "error", message: `Canal "${channel}" n\xE3o encontrado no Kick` })}
+    res.write(`data: ${JSON.stringify({ type: "error", message })}
 
 `);
     res.end();
     return;
   }
+  const chatroomId = chatroom.id;
   res.writeHead(200, {
     "Content-Type": "text/event-stream",
     "Cache-Control": "no-cache, no-transform",
@@ -443,9 +474,674 @@ async function kickChatSSE(req, res) {
   });
 }
 
+// server/twitch-chat.ts
+import WebSocket2 from "ws";
+var TWITCH_IRC_URL = "wss://irc-ws.chat.twitch.tv:443";
+var MAX_CONNECTION_LIFETIME_MS2 = 6 * 60 * 60 * 1e3;
+var MAX_IRC_PAYLOAD_BYTES = 256 * 1024;
+var MAX_MESSAGE_LENGTH2 = 4e3;
+var MAX_USER_NAME_LENGTH2 = 80;
+var MAX_MESSAGE_ID_LENGTH2 = 200;
+var twitchConnectionLimiter = new ConnectionLimiter({
+  maxActiveTotal: 100,
+  maxActivePerKey: 10,
+  maxAttemptsTotalPerWindow: 300,
+  maxAttemptsPerWindow: 30,
+  windowMs: 6e4
+});
+function getClientKey2(req) {
+  return resolveClientAddress(
+    req.socket.remoteAddress,
+    req.header("x-forwarded-for")
+  );
+}
+function rawDataSize2(raw) {
+  if (Array.isArray(raw)) {
+    return raw.reduce((total, item) => total + item.byteLength, 0);
+  }
+  return raw.byteLength;
+}
+function decodeIrcTag(value) {
+  return value.replace(/\\([sn:r\\])/g, (_, escaped) => {
+    if (escaped === "s") return " ";
+    if (escaped === "n") return "\n";
+    if (escaped === "r") return "\r";
+    if (escaped === ":") return ";";
+    return "\\";
+  });
+}
+function parseTags(raw) {
+  return Object.fromEntries(
+    raw.split(";").map((entry) => {
+      const separator = entry.indexOf("=");
+      return separator === -1 ? [entry, ""] : [
+        entry.slice(0, separator),
+        decodeIrcTag(entry.slice(separator + 1))
+      ];
+    })
+  );
+}
+function parseTwitchPrivmsg(line, fallbackTimestamp = Date.now()) {
+  if (!line.startsWith("@")) return null;
+  const tagEnd = line.indexOf(" ");
+  if (tagEnd < 2) return null;
+  const marker = " PRIVMSG ";
+  const commandStart = line.indexOf(marker, tagEnd);
+  if (commandStart === -1) return null;
+  const messageStart = line.indexOf(" :", commandStart + marker.length);
+  if (messageStart === -1) return null;
+  const tags = parseTags(line.slice(1, tagEnd));
+  const message = line.slice(messageStart + 2).trim().slice(0, MAX_MESSAGE_LENGTH2);
+  if (!message) return null;
+  const parsedTimestamp = Number(tags["tmi-sent-ts"]);
+  const fallbackUser = line.slice(tagEnd + 1, commandStart).replace(/^:/, "").split("!", 1)[0];
+  return {
+    messageId: (tags.id || `${fallbackTimestamp}-${Math.random()}`).slice(0, MAX_MESSAGE_ID_LENGTH2),
+    userName: (tags["display-name"] || fallbackUser || "Unknown").slice(0, MAX_USER_NAME_LENGTH2),
+    userAvatar: null,
+    message,
+    timestamp: Number.isFinite(parsedTimestamp) && parsedTimestamp > 0 ? parsedTimestamp : fallbackTimestamp
+  };
+}
+function getCredentials() {
+  const configuredToken = process.env.TWITCH_OAUTH_TOKEN?.trim();
+  const configuredNick = process.env.TWITCH_BOT_USERNAME?.trim().toLowerCase();
+  if (configuredToken && configuredNick && /^[a-z\d_]{1,25}$/.test(configuredNick)) {
+    return {
+      pass: configuredToken.startsWith("oauth:") ? configuredToken : `oauth:${configuredToken}`,
+      nick: configuredNick,
+      authenticated: true
+    };
+  }
+  return {
+    pass: "SCHMOOPIIE",
+    nick: `justinfan${Math.floor(1e4 + Math.random() * 89999)}`,
+    authenticated: false
+  };
+}
+async function twitchChatSSE(req, res) {
+  const channelParam = req.params.channel;
+  const channel = (Array.isArray(channelParam) ? channelParam[0] : channelParam ?? "").toLowerCase().trim();
+  if (!/^[a-z\d_]{1,25}$/.test(channel)) {
+    res.status(400).json({ error: "Invalid Twitch channel" });
+    return;
+  }
+  const lease = twitchConnectionLimiter.tryAcquire(getClientKey2(req));
+  if (lease.ok === false) {
+    res.setHeader("Retry-After", String(lease.retryAfterSeconds));
+    res.status(lease.status).json({ error: lease.reason });
+    return;
+  }
+  let closed = false;
+  let ws;
+  let heartbeatTimer = null;
+  let maxLifetimeTimer;
+  let backpressured = false;
+  const handleDrain = () => {
+    backpressured = false;
+    try {
+      ws?.resume();
+    } catch {
+    }
+  };
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(maxLifetimeTimer);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    res.off("drain", handleDrain);
+    lease.release();
+    try {
+      ws?.close();
+    } catch {
+    }
+  };
+  maxLifetimeTimer = setTimeout(() => {
+    cleanup();
+    if (!res.writableEnded) res.end();
+  }, MAX_CONNECTION_LIFETIME_MS2);
+  maxLifetimeTimer.unref?.();
+  bindSseLifecycle(req, res, cleanup);
+  res.on("drain", handleDrain);
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+  const send = (payload) => {
+    if (closed || res.writableEnded || res.destroyed || backpressured) return;
+    try {
+      if (!res.write(`data: ${JSON.stringify(payload)}
+
+`)) {
+        backpressured = true;
+        try {
+          ws?.pause();
+        } catch {
+        }
+      }
+    } catch {
+      cleanup();
+    }
+  };
+  const credentials = getCredentials();
+  try {
+    ws = new WebSocket2(TWITCH_IRC_URL, {
+      maxPayload: MAX_IRC_PAYLOAD_BYTES,
+      perMessageDeflate: false
+    });
+  } catch {
+    send({ type: "error", message: "Unable to initialize Twitch chat" });
+    res.end();
+    return;
+  }
+  ws.on("open", () => {
+    if (backpressured) ws?.pause();
+    ws?.send("CAP REQ :twitch.tv/tags twitch.tv/commands");
+    ws?.send(`PASS ${credentials.pass}`);
+    ws?.send(`NICK ${credentials.nick}`);
+    ws?.send(`JOIN #${channel}`);
+    send({
+      type: "connected",
+      authenticated: credentials.authenticated
+    });
+  });
+  ws.on("message", (raw) => {
+    if (rawDataSize2(raw) > MAX_IRC_PAYLOAD_BYTES) return;
+    for (const line of raw.toString().split(/\r?\n/)) {
+      if (!line) continue;
+      if (line.startsWith("PING ")) {
+        if (ws?.readyState === WebSocket2.OPEN) {
+          ws.send(`PONG ${line.slice(5)}`);
+        }
+        continue;
+      }
+      if (/Login authentication failed|Improperly formatted auth/i.test(line)) {
+        send({
+          type: "error",
+          message: "Twitch authentication failed. Check TWITCH_BOT_USERNAME and TWITCH_OAUTH_TOKEN."
+        });
+        continue;
+      }
+      const message = parseTwitchPrivmsg(line);
+      if (message) send({ type: "message", ...message });
+    }
+  });
+  heartbeatTimer = setInterval(() => {
+    send({ type: "heartbeat" });
+  }, 25e3);
+  heartbeatTimer.unref?.();
+  ws.on("error", (error) => {
+    console.error(`[twitch] WebSocket error for "${channel}": ${error.message}`);
+    send({ type: "error", message: "Twitch chat connection failed" });
+  });
+  ws.on("close", () => {
+    if (!closed) send({ type: "disconnected" });
+    cleanup();
+    try {
+      res.end();
+    } catch {
+    }
+  });
+}
+
+// server/youtube-chat.ts
+var MAX_CONNECTION_LIFETIME_MS3 = 6 * 60 * 60 * 1e3;
+var MAX_RESPONSE_BYTES = 5 * 1024 * 1024;
+var MAX_MESSAGE_LENGTH3 = 4e3;
+var MAX_USER_NAME_LENGTH3 = 80;
+var MAX_MESSAGE_ID_LENGTH3 = 200;
+var MAX_AVATAR_URL_LENGTH2 = 2048;
+var MAX_SEEN_IDS = 5e3;
+var DEFAULT_POLL_INTERVAL_MS = 3e3;
+var youtubeConnectionLimiter = new ConnectionLimiter({
+  maxActiveTotal: 100,
+  maxActivePerKey: 10,
+  maxAttemptsTotalPerWindow: 300,
+  maxAttemptsPerWindow: 30,
+  windowMs: 6e4
+});
+function isRecord(value) {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function boundedText(value, maxLength) {
+  return typeof value === "string" || typeof value === "number" ? String(value).trim().slice(0, maxLength) : "";
+}
+function getClientKey3(req) {
+  return resolveClientAddress(
+    req.socket.remoteAddress,
+    req.header("x-forwarded-for")
+  );
+}
+function safeAvatarUrl2(value) {
+  if (typeof value !== "string" || value.length > MAX_AVATAR_URL_LENGTH2) {
+    return null;
+  }
+  try {
+    const url = new URL(value.startsWith("//") ? `https:${value}` : value);
+    return url.protocol === "https:" && !url.username && !url.password ? url.href : null;
+  } catch {
+    return null;
+  }
+}
+function simpleText(value) {
+  if (!isRecord(value)) return "";
+  if (typeof value.simpleText === "string") return value.simpleText;
+  if (!Array.isArray(value.runs)) return "";
+  return value.runs.map((run) => {
+    if (!isRecord(run)) return "";
+    if (typeof run.text === "string") return run.text;
+    if (!isRecord(run.emoji)) return "";
+    const shortcuts = run.emoji.shortcuts;
+    if (Array.isArray(shortcuts) && typeof shortcuts[0] === "string") {
+      return shortcuts[0];
+    }
+    const accessibility = run.emoji.image;
+    if (isRecord(accessibility) && isRecord(accessibility.accessibility) && isRecord(accessibility.accessibility.accessibilityData)) {
+      return boundedText(
+        accessibility.accessibility.accessibilityData.label,
+        100
+      );
+    }
+    return "";
+  }).join("");
+}
+function firstThumbnail(value) {
+  if (!isRecord(value) || !Array.isArray(value.thumbnails)) return null;
+  for (let index = value.thumbnails.length - 1; index >= 0; index -= 1) {
+    const thumbnail = value.thumbnails[index];
+    if (isRecord(thumbnail)) {
+      const safe = safeAvatarUrl2(thumbnail.url);
+      if (safe) return safe;
+    }
+  }
+  return null;
+}
+function parseRenderer(renderer, fallbackTimestamp = Date.now()) {
+  const messageParts = [
+    simpleText(renderer.message),
+    simpleText(renderer.headerSubtext),
+    simpleText(renderer.primaryText),
+    simpleText(renderer.purchaseAmountText)
+  ].filter(Boolean);
+  if (isRecord(renderer.sticker)) {
+    const accessibility = renderer.sticker.accessibility;
+    if (isRecord(accessibility) && isRecord(accessibility.accessibilityData)) {
+      const stickerLabel = boundedText(
+        accessibility.accessibilityData.label,
+        200
+      );
+      if (stickerLabel) messageParts.push(stickerLabel);
+    }
+  }
+  const message = Array.from(new Set(messageParts)).join(" \xB7 ").trim().slice(0, MAX_MESSAGE_LENGTH3);
+  if (!message) return null;
+  const timestampUsec = Number(renderer.timestampUsec);
+  const timestamp = Number.isFinite(timestampUsec) && timestampUsec > 0 ? Math.floor(timestampUsec / 1e3) : fallbackTimestamp;
+  return {
+    messageId: boundedText(renderer.id, MAX_MESSAGE_ID_LENGTH3) || `${timestamp}-${Math.random()}`,
+    userName: simpleText(renderer.authorName).slice(0, MAX_USER_NAME_LENGTH3) || "YouTube",
+    userAvatar: firstThumbnail(renderer.authorPhoto),
+    message,
+    timestamp
+  };
+}
+var MESSAGE_RENDERERS = /* @__PURE__ */ new Set([
+  "liveChatTextMessageRenderer",
+  "liveChatPaidMessageRenderer",
+  "liveChatPaidStickerRenderer",
+  "liveChatMembershipItemRenderer",
+  "liveChatSponsorshipsGiftPurchaseAnnouncementRenderer",
+  "liveChatSponsorshipsGiftRedemptionAnnouncementRenderer"
+]);
+function extractYouTubeMessages(root) {
+  const output = [];
+  const stack = [root];
+  const visited = /* @__PURE__ */ new Set();
+  let inspected = 0;
+  while (stack.length > 0 && inspected < 5e4) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object" || visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    inspected += 1;
+    if (Array.isArray(current)) {
+      for (const value of current) stack.push(value);
+      continue;
+    }
+    for (const [key, value] of Object.entries(current)) {
+      if (MESSAGE_RENDERERS.has(key) && isRecord(value)) {
+        const message = parseRenderer(value);
+        if (message) output.push(message);
+      } else if (value && typeof value === "object") {
+        stack.push(value);
+      }
+    }
+  }
+  return output;
+}
+function extractYouTubeContinuation(root) {
+  const stack = [root];
+  const visited = /* @__PURE__ */ new Set();
+  let inspected = 0;
+  while (stack.length > 0 && inspected < 5e4) {
+    const current = stack.pop();
+    if (!current || typeof current !== "object" || visited.has(current)) {
+      continue;
+    }
+    visited.add(current);
+    inspected += 1;
+    if (Array.isArray(current)) {
+      for (const value of current) stack.push(value);
+      continue;
+    }
+    const record = current;
+    for (const key of [
+      "timedContinuationData",
+      "invalidationContinuationData",
+      "reloadContinuationData"
+    ]) {
+      const data = record[key];
+      if (isRecord(data) && typeof data.continuation === "string") {
+        const rawTimeout = Number(data.timeoutMs);
+        return {
+          continuation: data.continuation,
+          timeoutMs: Number.isFinite(rawTimeout) ? Math.max(1e3, Math.min(1e4, rawTimeout)) : DEFAULT_POLL_INTERVAL_MS
+        };
+      }
+    }
+    for (const value of Object.values(record)) {
+      if (value && typeof value === "object") stack.push(value);
+    }
+  }
+  return null;
+}
+function extractAssignedJson(html, markers) {
+  for (const marker of markers) {
+    const markerIndex = html.indexOf(marker);
+    if (markerIndex === -1) continue;
+    const start = html.indexOf("{", markerIndex + marker.length);
+    if (start === -1) continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    for (let index = start; index < html.length; index += 1) {
+      const character = html[index];
+      if (inString) {
+        if (escaped) {
+          escaped = false;
+        } else if (character === "\\") {
+          escaped = true;
+        } else if (character === '"') {
+          inString = false;
+        }
+        continue;
+      }
+      if (character === '"') {
+        inString = true;
+      } else if (character === "{") {
+        depth += 1;
+      } else if (character === "}") {
+        depth -= 1;
+        if (depth === 0) {
+          try {
+            return JSON.parse(html.slice(start, index + 1));
+          } catch {
+            break;
+          }
+        }
+      }
+    }
+  }
+  return null;
+}
+async function responseText(response) {
+  const declaredLength = Number(response.headers.get("content-length"));
+  if (Number.isFinite(declaredLength) && declaredLength > MAX_RESPONSE_BYTES) {
+    throw new Error("YouTube response is too large");
+  }
+  const text = await response.text();
+  if (text.length > MAX_RESPONSE_BYTES) {
+    throw new Error("YouTube response is too large");
+  }
+  return text;
+}
+async function resolveHandle(handle) {
+  const response = await fetch(
+    `https://www.youtube.com/@${encodeURIComponent(handle)}/live`,
+    {
+      redirect: "follow",
+      headers: {
+        Accept: "text/html",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+      },
+      signal: AbortSignal.timeout(15e3)
+    }
+  );
+  if (!response.ok) return null;
+  const finalUrl = new URL(response.url);
+  const redirectedId = finalUrl.searchParams.get("v") ?? (/^\/live\/([a-z\d_-]{6,20})$/i.exec(finalUrl.pathname)?.[1] ?? null);
+  if (redirectedId && /^[a-z\d_-]{6,20}$/i.test(redirectedId)) {
+    return redirectedId;
+  }
+  const html = await responseText(response);
+  const liveMarker = html.indexOf('"isLiveNow":true');
+  if (liveMarker !== -1) {
+    const nearby = html.slice(
+      Math.max(0, liveMarker - 4e3),
+      Math.min(html.length, liveMarker + 4e3)
+    );
+    const externalVideoId = /"externalVideoId":"([a-z\d_-]{6,20})"/i.exec(nearby)?.[1] ?? /"canonicalUrl":"https:\\?\/\\?\/www\.youtube\.com\\?\/watch\?v=([a-z\d_-]{6,20})"/i.exec(
+      nearby
+    )?.[1];
+    if (externalVideoId) return externalVideoId;
+    const matches = Array.from(
+      nearby.matchAll(/"videoId":"([a-z\d_-]{6,20})"/gi)
+    );
+    const candidate = matches.at(-1)?.[1];
+    if (candidate) return candidate;
+  }
+  return null;
+}
+async function bootstrap(videoId) {
+  const response = await fetch(
+    `https://www.youtube.com/live_chat?is_popout=1&v=${encodeURIComponent(videoId)}`,
+    {
+      headers: {
+        Accept: "text/html",
+        "Accept-Language": "en-US,en;q=0.9",
+        "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/144.0.0.0 Safari/537.36"
+      },
+      signal: AbortSignal.timeout(15e3)
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`YouTube returned HTTP ${response.status}`);
+  }
+  const html = await responseText(response);
+  const apiKey = /"INNERTUBE_API_KEY":"([^"]+)"/.exec(html)?.[1];
+  const clientVersion = /"INNERTUBE_CLIENT_VERSION":"([^"]+)"/.exec(html)?.[1];
+  const initialData = extractAssignedJson(html, [
+    'window["ytInitialData"] =',
+    "var ytInitialData =",
+    "ytInitialData ="
+  ]);
+  const next = extractYouTubeContinuation(initialData);
+  if (!apiKey || !clientVersion || !next) {
+    throw new Error("Live chat is unavailable or the stream is offline");
+  }
+  return {
+    apiKey,
+    clientVersion,
+    continuation: next.continuation,
+    initialMessages: extractYouTubeMessages(initialData)
+  };
+}
+async function fetchContinuation(bootstrapData, continuation) {
+  const response = await fetch(
+    `https://www.youtube.com/youtubei/v1/live_chat/get_live_chat?key=${encodeURIComponent(bootstrapData.apiKey)}`,
+    {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        "Content-Type": "application/json",
+        "X-YouTube-Client-Name": "1",
+        "X-YouTube-Client-Version": bootstrapData.clientVersion
+      },
+      body: JSON.stringify({
+        context: {
+          client: {
+            clientName: "WEB",
+            clientVersion: bootstrapData.clientVersion,
+            hl: "en"
+          }
+        },
+        continuation
+      }),
+      signal: AbortSignal.timeout(15e3)
+    }
+  );
+  if (!response.ok) {
+    throw new Error(`YouTube chat returned HTTP ${response.status}`);
+  }
+  return JSON.parse(await responseText(response));
+}
+function delay(ms) {
+  return new Promise((resolve2) => {
+    const timer = setTimeout(resolve2, ms);
+    timer.unref?.();
+  });
+}
+async function streamYouTubeChat(videoId, isClosed, send) {
+  const bootstrapData = await bootstrap(videoId);
+  const seenIds = /* @__PURE__ */ new Set();
+  const emitMessages = (messages) => {
+    for (const message of messages) {
+      if (seenIds.has(message.messageId)) continue;
+      seenIds.add(message.messageId);
+      send({ type: "message", ...message });
+    }
+    if (seenIds.size > MAX_SEEN_IDS) {
+      const newest = Array.from(seenIds).slice(-MAX_SEEN_IDS);
+      seenIds.clear();
+      newest.forEach((id) => seenIds.add(id));
+    }
+  };
+  send({ type: "connected", videoId });
+  emitMessages(bootstrapData.initialMessages);
+  let continuation = bootstrapData.continuation;
+  let pollInterval = DEFAULT_POLL_INTERVAL_MS;
+  while (!isClosed()) {
+    await delay(pollInterval);
+    if (isClosed()) break;
+    const payload = await fetchContinuation(bootstrapData, continuation);
+    emitMessages(extractYouTubeMessages(payload));
+    const next = extractYouTubeContinuation(payload);
+    if (!next) {
+      send({ type: "disconnected" });
+      break;
+    }
+    continuation = next.continuation;
+    pollInterval = next.timeoutMs;
+  }
+}
+async function youtubeChatSSEForTarget(req, res, resolveVideoId) {
+  const lease = youtubeConnectionLimiter.tryAcquire(getClientKey3(req));
+  if (lease.ok === false) {
+    res.setHeader("Retry-After", String(lease.retryAfterSeconds));
+    res.status(lease.status).json({ error: lease.reason });
+    return;
+  }
+  let closed = false;
+  let backpressured = false;
+  let heartbeatTimer = null;
+  let maxLifetimeTimer;
+  const handleDrain = () => {
+    backpressured = false;
+  };
+  const cleanup = () => {
+    if (closed) return;
+    closed = true;
+    clearTimeout(maxLifetimeTimer);
+    if (heartbeatTimer) clearInterval(heartbeatTimer);
+    res.off("drain", handleDrain);
+    lease.release();
+  };
+  maxLifetimeTimer = setTimeout(() => {
+    cleanup();
+    if (!res.writableEnded) res.end();
+  }, MAX_CONNECTION_LIFETIME_MS3);
+  maxLifetimeTimer.unref?.();
+  bindSseLifecycle(req, res, cleanup);
+  res.on("drain", handleDrain);
+  res.writeHead(200, {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+    "X-Accel-Buffering": "no"
+  });
+  const send = (payload) => {
+    if (closed || res.writableEnded || res.destroyed || backpressured) return;
+    try {
+      if (!res.write(`data: ${JSON.stringify(payload)}
+
+`)) {
+        backpressured = true;
+      }
+    } catch {
+      cleanup();
+    }
+  };
+  heartbeatTimer = setInterval(() => send({ type: "heartbeat" }), 25e3);
+  heartbeatTimer.unref?.();
+  try {
+    const videoId = await resolveVideoId();
+    if (!videoId || closed) {
+      if (!closed) {
+        send({
+          type: "error",
+          message: "No active YouTube live stream was found"
+        });
+        res.end();
+      }
+      return;
+    }
+    await streamYouTubeChat(videoId, () => closed, send);
+    if (!closed) res.end();
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    send({ type: "error", message });
+    if (!res.writableEnded) res.end();
+  }
+}
+async function youtubeVideoChatSSE(req, res) {
+  const videoIdParam = req.params.videoId;
+  const videoId = Array.isArray(videoIdParam) ? videoIdParam[0] : videoIdParam ?? "";
+  if (!/^[a-z\d_-]{6,20}$/i.test(videoId)) {
+    res.status(400).json({ error: "Invalid YouTube video id" });
+    return;
+  }
+  await youtubeChatSSEForTarget(req, res, async () => videoId);
+}
+async function youtubeHandleChatSSE(req, res) {
+  const handleParam = req.params.handle;
+  const handle = Array.isArray(handleParam) ? handleParam[0] : handleParam ?? "";
+  if (!/^[a-z\d_.-]{1,40}$/i.test(handle)) {
+    res.status(400).json({ error: "Invalid YouTube handle" });
+    return;
+  }
+  await youtubeChatSSEForTarget(req, res, () => resolveHandle(handle));
+}
+
 // server/routes.ts
 async function registerRoutes(app2) {
   app2.get("/api/kick/chat/:channel", kickChatSSE);
+  app2.get("/api/twitch/chat/:channel", twitchChatSSE);
+  app2.get("/api/youtube/chat/video/:videoId", youtubeVideoChatSSE);
+  app2.get("/api/youtube/chat/handle/:handle", youtubeHandleChatSSE);
   const httpServer = createServer(app2);
   return httpServer;
 }
