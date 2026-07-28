@@ -1010,8 +1010,8 @@ async function fetchContinuation(bootstrapData, continuation) {
   return JSON.parse(await responseText(response));
 }
 function delay(ms) {
-  return new Promise((resolve2) => {
-    const timer = setTimeout(resolve2, ms);
+  return new Promise((resolve3) => {
+    const timer = setTimeout(resolve3, ms);
     timer.unref?.();
   });
 }
@@ -1146,12 +1146,203 @@ async function registerRoutes(app2) {
   return httpServer;
 }
 
+// server/expo-deployment.ts
+import * as fs from "node:fs";
+import * as path from "node:path";
+var EXPO_PUBLIC_ORIGIN_PLACEHOLDER = "https://expo-public-origin.invalid";
+function isObject(value) {
+  return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+function firstValidDomain(values) {
+  for (const value of values) {
+    if (normalizePublicHost(value)) return value.trim();
+  }
+  return null;
+}
+function selectExpoPublicDomain(environment = process.env) {
+  const publicDomains = environment.REPLIT_DOMAINS?.split(",").map(
+    (domain) => domain.trim()
+  );
+  const published = environment.REPLIT_DEPLOYMENT === "1" || environment.NODE_ENV === "production";
+  return firstValidDomain([
+    environment.EXPO_PUBLIC_DOMAIN,
+    ...publicDomains ?? [],
+    ...published ? [] : [
+      environment.REPLIT_DEV_DOMAIN,
+      environment.REPLIT_INTERNAL_APP_DOMAIN
+    ]
+  ]);
+}
+function resolveExpoPublicOrigin(environment, requestHost, requestProtocol) {
+  const configuredDomain = selectExpoPublicDomain(environment);
+  const published = environment.REPLIT_DEPLOYMENT === "1" || environment.NODE_ENV === "production";
+  if (published && !configuredDomain) return null;
+  return resolvePublicOrigin(
+    configuredDomain,
+    requestHost,
+    requestProtocol
+  );
+}
+function rebaseUrl(value, origin) {
+  if (typeof value !== "string") {
+    throw new Error("Expo manifest contains a non-string asset URL");
+  }
+  let url;
+  try {
+    url = new URL(value, EXPO_PUBLIC_ORIGIN_PLACEHOLDER);
+  } catch {
+    throw new Error("Expo manifest contains an invalid asset URL");
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    throw new Error("Expo manifest contains an unsupported asset URL");
+  }
+  return `${origin}${url.pathname}${url.search}${url.hash}`;
+}
+function isLocalOrPlaceholderHost(hostname) {
+  return hostname === "localhost" || hostname === "127.0.0.1" || hostname === "::1" || hostname === new URL(EXPO_PUBLIC_ORIGIN_PLACEHOLDER).hostname;
+}
+function normalizePublishedAssetPath(pathname) {
+  if (pathname.startsWith("/assets/assets/")) {
+    return pathname.slice("/assets".length);
+  }
+  return pathname;
+}
+function rewriteLocalManifestUrls(value, publicOrigin) {
+  if (Array.isArray(value)) {
+    for (let index = 0; index < value.length; index += 1) {
+      const item = value[index];
+      if (typeof item === "string") {
+        value[index] = rewriteLocalManifestUrl(item, publicOrigin);
+      } else {
+        rewriteLocalManifestUrls(item, publicOrigin);
+      }
+    }
+    return;
+  }
+  if (!isObject(value)) return;
+  for (const [key, item] of Object.entries(value)) {
+    if (typeof item === "string") {
+      value[key] = rewriteLocalManifestUrl(item, publicOrigin);
+    } else {
+      rewriteLocalManifestUrls(item, publicOrigin);
+    }
+  }
+}
+function rewriteLocalManifestUrl(value, publicOrigin) {
+  let url;
+  try {
+    url = new URL(value);
+  } catch {
+    return value;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:" || !isLocalOrPlaceholderHost(url.hostname)) {
+    return value;
+  }
+  const pathname = normalizePublishedAssetPath(url.pathname);
+  return `${publicOrigin.origin}${pathname}${url.search}${url.hash}`;
+}
+function prepareExpoManifest(input, platform, publicOrigin) {
+  if (!isObject(input)) {
+    throw new Error(`Malformed Expo manifest for ${platform}`);
+  }
+  const manifest = structuredClone(input);
+  rewriteLocalManifestUrls(manifest, publicOrigin);
+  if (!isObject(manifest.launchAsset)) {
+    throw new Error(`Expo manifest has no launch asset for ${platform}`);
+  }
+  const launchUrl = rebaseUrl(manifest.launchAsset.url, publicOrigin.origin);
+  const launchPath = new URL(launchUrl).pathname;
+  const expectedSuffix = `/_expo/static/js/${platform}/bundle.js`;
+  if (!launchPath.endsWith(expectedSuffix)) {
+    throw new Error(`Expo launch asset does not match ${platform}`);
+  }
+  manifest.launchAsset.url = launchUrl;
+  manifest.launchAsset.contentType = "application/javascript";
+  if (Array.isArray(manifest.assets)) {
+    for (const asset of manifest.assets) {
+      if (!isObject(asset) || typeof asset.url !== "string") continue;
+      const parsedAssetUrl = new URL(
+        asset.url,
+        EXPO_PUBLIC_ORIGIN_PLACEHOLDER
+      );
+      if (parsedAssetUrl.host === new URL(EXPO_PUBLIC_ORIGIN_PLACEHOLDER).host || parsedAssetUrl.pathname.includes("/_expo/static/js/")) {
+        asset.url = rebaseUrl(asset.url, publicOrigin.origin);
+      }
+    }
+  }
+  if (!isObject(manifest.extra)) manifest.extra = {};
+  const extra = manifest.extra;
+  if (!isObject(extra.expoClient)) extra.expoClient = {};
+  const expoClient = extra.expoClient;
+  expoClient.hostUri = publicOrigin.host;
+  delete expoClient._internal;
+  if (!isObject(extra.expoGo)) extra.expoGo = {};
+  const expoGo = extra.expoGo;
+  expoGo.debuggerHost = publicOrigin.host;
+  if (isObject(expoGo.developer)) {
+    delete expoGo.developer.projectRoot;
+  }
+  if (!isObject(expoGo.packagerOpts)) {
+    expoGo.packagerOpts = {};
+  }
+  expoGo.packagerOpts.dev = false;
+  return manifest;
+}
+function injectExpoPublicOrigin(bundle, publicOrigin) {
+  if (!bundle.includes(EXPO_PUBLIC_ORIGIN_PLACEHOLDER)) {
+    throw new Error("Expo bundle has no public-origin placeholder");
+  }
+  return bundle.replaceAll(
+    EXPO_PUBLIC_ORIGIN_PLACEHOLDER,
+    publicOrigin.origin
+  );
+}
+function validateExpoBuild(buildRoot) {
+  for (const platform of ["ios", "android"]) {
+    const manifestPath = path.join(buildRoot, platform, "manifest.json");
+    if (!fs.existsSync(manifestPath)) {
+      throw new Error(`Missing Expo manifest for ${platform}`);
+    }
+    let manifest;
+    try {
+      manifest = JSON.parse(fs.readFileSync(manifestPath, "utf-8"));
+    } catch {
+      throw new Error(`Invalid Expo manifest JSON for ${platform}`);
+    }
+    if (!isObject(manifest) || !isObject(manifest.launchAsset)) {
+      throw new Error(`Malformed Expo manifest for ${platform}`);
+    }
+    const launchAssetUrl = manifest.launchAsset.url;
+    if (typeof launchAssetUrl !== "string") {
+      throw new Error(`Missing Expo launch asset URL for ${platform}`);
+    }
+    const launchPath = new URL(
+      launchAssetUrl,
+      EXPO_PUBLIC_ORIGIN_PLACEHOLDER
+    ).pathname;
+    const relativeLaunchPath = launchPath.replace(/^\/+/, "");
+    const bundlePath = path.resolve(buildRoot, relativeLaunchPath);
+    const relativeToRoot = path.relative(buildRoot, bundlePath);
+    if (relativeToRoot.startsWith("..") || path.isAbsolute(relativeToRoot) || !fs.existsSync(bundlePath) || fs.statSync(bundlePath).size === 0) {
+      throw new Error(`Missing Expo launch bundle for ${platform}`);
+    }
+    const bundle = fs.readFileSync(bundlePath, "utf-8");
+    if (!bundle.includes(EXPO_PUBLIC_ORIGIN_PLACEHOLDER)) {
+      throw new Error(
+        `Expo launch bundle has no public-origin placeholder for ${platform}`
+      );
+    }
+  }
+}
+
 // server/index.ts
-import * as fs from "fs";
-import * as path from "path";
+import * as fs2 from "fs";
+import * as path2 from "path";
 import { randomBytes } from "node:crypto";
+import { createProxyMiddleware } from "http-proxy-middleware";
 var app = express();
 var log = console.log;
+var expoBundleCache = /* @__PURE__ */ new Map();
 app.disable("x-powered-by");
 function setupCors(app2) {
   app2.use((req, res, next) => {
@@ -1223,11 +1414,11 @@ function setupBodyParsing(app2) {
 function setupRequestLogging(app2) {
   app2.use((req, res, next) => {
     const start = Date.now();
-    const path2 = req.path;
+    const path3 = req.path;
     res.on("finish", () => {
-      if (!path2.startsWith("/api")) return;
+      if (!path3.startsWith("/api")) return;
       const duration = Date.now() - start;
-      let logLine = `${req.method} ${path2} ${res.statusCode} in ${duration}ms`;
+      let logLine = `${req.method} ${path3} ${res.statusCode} in ${duration}ms`;
       if (logLine.length > 80) {
         logLine = logLine.slice(0, 79) + "\u2026";
       }
@@ -1238,29 +1429,95 @@ function setupRequestLogging(app2) {
 }
 function getAppName() {
   try {
-    const appJsonPath = path.resolve(process.cwd(), "app.json");
-    const appJsonContent = fs.readFileSync(appJsonPath, "utf-8");
+    const appJsonPath = path2.resolve(process.cwd(), "app.json");
+    const appJsonContent = fs2.readFileSync(appJsonPath, "utf-8");
     const appJson = JSON.parse(appJsonContent);
     return appJson.expo?.name || "App Landing Page";
   } catch {
     return "App Landing Page";
   }
 }
-function serveExpoManifest(platform, res) {
-  const manifestPath = path.resolve(
+function getRequestPublicOrigin(req) {
+  return resolveExpoPublicOrigin(
+    process.env,
+    req.get("host"),
+    req.protocol
+  );
+}
+function serveExpoManifest(platform, req, res) {
+  const manifestPath = path2.resolve(
     process.cwd(),
     "static-build",
     platform,
     "manifest.json"
   );
-  if (!fs.existsSync(manifestPath)) {
+  if (!fs2.existsSync(manifestPath)) {
     return res.status(404).json({ error: `Manifest not found for platform: ${platform}` });
   }
-  res.setHeader("expo-protocol-version", "1");
+  const publicOrigin = getRequestPublicOrigin(req);
+  if (!publicOrigin) {
+    return res.status(503).json({ error: "Public deployment domain unavailable" });
+  }
+  const manifest = prepareExpoManifest(
+    JSON.parse(fs2.readFileSync(manifestPath, "utf-8")),
+    platform,
+    publicOrigin
+  );
+  res.setHeader("expo-protocol-version", "0");
   res.setHeader("expo-sfv-version", "0");
   res.setHeader("content-type", "application/json");
-  const manifest = fs.readFileSync(manifestPath, "utf-8");
-  res.send(manifest);
+  res.setHeader("cache-control", "private, max-age=0");
+  res.status(200).send(JSON.stringify(manifest));
+}
+function serveExpoBundle(req, res, next) {
+  if (req.method !== "GET" && req.method !== "HEAD") return next();
+  const match = req.path.match(
+    /^\/(\d+-\d+)\/_expo\/static\/js\/(ios|android)\/bundle\.js$/
+  );
+  if (!match) return next();
+  const bundlePath = path2.resolve(
+    process.cwd(),
+    "static-build",
+    match[1],
+    "_expo",
+    "static",
+    "js",
+    match[2],
+    "bundle.js"
+  );
+  if (!fs2.existsSync(bundlePath)) return next();
+  const publicOrigin = getRequestPublicOrigin(req);
+  if (!publicOrigin) {
+    return res.status(503).json({ error: "Public deployment domain unavailable" });
+  }
+  const cacheKey = `${bundlePath}\0${publicOrigin.origin}`;
+  const mtimeMs = fs2.statSync(bundlePath).mtimeMs;
+  let cachedBundle = expoBundleCache.get(cacheKey);
+  if (!cachedBundle || cachedBundle.mtimeMs !== mtimeMs) {
+    cachedBundle = {
+      mtimeMs,
+      content: Buffer.from(
+        injectExpoPublicOrigin(
+          fs2.readFileSync(bundlePath, "utf-8"),
+          publicOrigin
+        )
+      )
+    };
+    expoBundleCache.delete(cacheKey);
+    expoBundleCache.set(cacheKey, cachedBundle);
+    while (expoBundleCache.size > 4) {
+      const oldestKey = expoBundleCache.keys().next().value;
+      if (typeof oldestKey !== "string") break;
+      expoBundleCache.delete(oldestKey);
+    }
+  }
+  res.setHeader(
+    "content-type",
+    "application/javascript; charset=utf-8"
+  );
+  res.setHeader("cache-control", "private, max-age=0");
+  res.setHeader("content-length", cachedBundle.content.length);
+  res.status(200).send(cachedBundle.content);
 }
 function serveLandingPage({
   req,
@@ -1268,7 +1525,7 @@ function serveLandingPage({
   landingPageTemplate,
   appName
 }) {
-  const configuredDomain = process.env.REPLIT_INTERNAL_APP_DOMAIN ?? process.env.REPLIT_DEV_DOMAIN ?? process.env.REPLIT_DOMAINS?.split(",")[0] ?? process.env.EXPO_PUBLIC_DOMAIN;
+  const configuredDomain = selectExpoPublicDomain(process.env);
   if (process.env.NODE_ENV === "production" && !normalizePublicHost(configuredDomain)) {
     res.status(503).type("text/plain").send("Service unavailable");
     return;
@@ -1293,25 +1550,27 @@ function serveLandingPage({
   res.status(200).send(html);
 }
 function configureExpoAndLanding(app2) {
-  const templatePath = path.resolve(
+  const buildRoot = path2.resolve(process.cwd(), "static-build");
+  validateExpoBuild(buildRoot);
+  const templatePath = path2.resolve(
     process.cwd(),
     "server",
     "templates",
     "landing-page.html"
   );
-  const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
+  const landingPageTemplate = fs2.readFileSync(templatePath, "utf-8");
   const appName = getAppName();
   log("Serving static Expo files with dynamic manifest routing");
   app2.use((req, res, next) => {
     if (req.path.startsWith("/api")) {
       return next();
     }
-    if (req.path !== "/" && req.path !== "/manifest") {
+    if (req.path !== "/" && req.path !== "/manifest" && req.path !== "/index.exp") {
       return next();
     }
-    const platform = req.header("expo-platform");
+    const platform = req.header("expo-platform") ?? (typeof req.query.platform === "string" ? req.query.platform : void 0);
     if (platform && (platform === "ios" || platform === "android")) {
-      return serveExpoManifest(platform, res);
+      return serveExpoManifest(platform, req, res);
     }
     if (req.path === "/") {
       return serveLandingPage({
@@ -1323,9 +1582,28 @@ function configureExpoAndLanding(app2) {
     }
     next();
   });
-  app2.use("/assets", express.static(path.resolve(process.cwd(), "assets")));
-  app2.use(express.static(path.resolve(process.cwd(), "static-build")));
+  app2.use(serveExpoBundle);
+  app2.use("/assets", express.static(path2.resolve(process.cwd(), "assets")));
+  app2.use(express.static(buildRoot));
   log("Expo routing: Checking expo-platform header on / and /manifest");
+}
+function configureDevelopmentMetroProxy(app2) {
+  const metroPort = Number.parseInt(
+    process.env.EXPO_METRO_PORT || "8081",
+    10
+  );
+  if (!Number.isInteger(metroPort) || metroPort < 1 || metroPort > 65535) {
+    throw new Error("EXPO_METRO_PORT must be a valid TCP port");
+  }
+  const metroProxy = createProxyMiddleware({
+    target: `http://127.0.0.1:${metroPort}`,
+    ws: true,
+    changeOrigin: false,
+    xfwd: true,
+    pathFilter: (pathname) => !pathname.startsWith("/api") && pathname !== "/healthz"
+  });
+  app2.use(metroProxy);
+  return metroProxy;
 }
 function setupErrorHandler(app2) {
   app2.use((err, req, res, next) => {
@@ -1350,8 +1628,20 @@ async function startServer() {
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
-  configureExpoAndLanding(app);
+  app.get("/healthz", (_req, res) => {
+    res.status(200).json({
+      status: "ok",
+      expo: process.env.NODE_ENV === "production" ? "static" : "metro-proxy"
+    });
+  });
+  const metroProxy = process.env.NODE_ENV === "production" ? null : configureDevelopmentMetroProxy(app);
+  if (process.env.NODE_ENV === "production") {
+    configureExpoAndLanding(app);
+  }
   const server = await registerRoutes(app);
+  if (metroProxy) {
+    server.on("upgrade", metroProxy.upgrade);
+  }
   setupErrorHandler(app);
   const port = parseInt(process.env.PORT || "5000", 10);
   server.listen(
