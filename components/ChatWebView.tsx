@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
@@ -10,7 +10,9 @@ import {
   getCurrentEmbedDomain,
   getKickChannelName,
   getYouTubeChatRedirect,
+  isAllowedYouTubeChatNavigation,
   isYouTubeLiveChatUrl,
+  shouldIgnoreYouTubeLoadEnd,
 } from "@/lib/chat-url";
 import { useChats } from "@/lib/chat-context";
 import {
@@ -36,20 +38,28 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
 
   const embedUrl = getChatEmbedUrl(chat.url, Platform.OS === "web" ? getCurrentEmbedDomain() : undefined);
   const [sourceUrl, setSourceUrl] = useState(embedUrl);
+  const sourceUrlRef = useRef(embedUrl);
+
+  const replaceSourceUrl = useCallback((nextUrl: string) => {
+    sourceUrlRef.current = nextUrl;
+    setSourceUrl(nextUrl);
+  }, []);
 
   useEffect(() => {
-    setSourceUrl(embedUrl);
+    replaceSourceUrl(embedUrl);
     setLoading(true);
     setError(false);
-  }, [embedUrl]);
+  }, [embedUrl, replaceSourceUrl]);
 
   const handleNavigationRequest = ({ url }: { url: string }) => {
     if (chat.platform === "youtube") {
-      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, url);
+      const activeSourceUrl = sourceUrlRef.current;
+      const redirectedChatUrl = getYouTubeChatRedirect(activeSourceUrl, url);
       if (redirectedChatUrl) {
-        setSourceUrl(redirectedChatUrl);
+        replaceSourceUrl(redirectedChatUrl);
         return false;
       }
+      return isAllowedYouTubeChatNavigation(url, activeSourceUrl);
     }
 
     return isAllowedWebViewNavigation(url, sourceUrl, chat.platform);
@@ -57,10 +67,16 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
 
   const handleLoadEnd = ({ nativeEvent }: { nativeEvent: { url: string } }) => {
     if (chat.platform === "youtube") {
-      const finalUrl = nativeEvent.url || sourceUrl;
-      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, finalUrl);
+      const activeSourceUrl = sourceUrlRef.current;
+      const finalUrl = nativeEvent.url || activeSourceUrl;
+      if (shouldIgnoreYouTubeLoadEnd(activeSourceUrl, finalUrl)) return;
+
+      const redirectedChatUrl = getYouTubeChatRedirect(
+        activeSourceUrl,
+        finalUrl,
+      );
       if (redirectedChatUrl) {
-        setSourceUrl(redirectedChatUrl);
+        replaceSourceUrl(redirectedChatUrl);
         return;
       }
       if (!isYouTubeLiveChatUrl(finalUrl)) {
@@ -112,7 +128,11 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
               src={embedUrl}
               style={{ width: "100%", height: "100%", border: "none", backgroundColor: themeColors.background } as any}
               allow="autoplay"
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+              sandbox={
+                chat.platform === "youtube"
+                  ? "allow-scripts allow-same-origin allow-forms"
+                  : "allow-scripts allow-same-origin allow-forms allow-popups"
+              }
               referrerPolicy="strict-origin-when-cross-origin"
             />
           )}

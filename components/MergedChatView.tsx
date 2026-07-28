@@ -10,7 +10,9 @@ import {
   getCurrentEmbedDomain,
   getKickChannelName,
   getYouTubeChatRedirect,
+  isAllowedYouTubeChatNavigation,
   isYouTubeLiveChatUrl,
+  shouldIgnoreYouTubeLoadEnd,
 } from "@/lib/chat-url";
 import { useChats } from "@/lib/chat-context";
 import {
@@ -55,6 +57,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
     Object.fromEntries(chats.map((c) => [c.id, true]))
   );
   const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
+  const resolvedUrlsRef = useRef<Record<string, string>>({});
 
   const safeIndex = Math.min(activeIndex, chats.length - 1);
   const activeChat = chats[safeIndex] || chats[0];
@@ -76,8 +79,15 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
     finalUrl: string,
   ) => {
     if (chat.platform === "youtube") {
-      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, finalUrl);
+      const activeSourceUrl = resolvedUrlsRef.current[chat.id] || sourceUrl;
+      if (shouldIgnoreYouTubeLoadEnd(activeSourceUrl, finalUrl)) return;
+
+      const redirectedChatUrl = getYouTubeChatRedirect(
+        activeSourceUrl,
+        finalUrl,
+      );
       if (redirectedChatUrl) {
+        resolvedUrlsRef.current[chat.id] = redirectedChatUrl;
         setResolvedUrls((prev) => ({
           ...prev,
           [chat.id]: redirectedChatUrl,
@@ -95,14 +105,17 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
 
   const handleNavigationRequest = (chat: ChatConfig, sourceUrl: string, url: string) => {
     if (chat.platform === "youtube") {
-      const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, url);
+      const activeSourceUrl = resolvedUrlsRef.current[chat.id] || sourceUrl;
+      const redirectedChatUrl = getYouTubeChatRedirect(activeSourceUrl, url);
       if (redirectedChatUrl) {
+        resolvedUrlsRef.current[chat.id] = redirectedChatUrl;
         setResolvedUrls((prev) => ({
           ...prev,
           [chat.id]: redirectedChatUrl,
         }));
         return false;
       }
+      return isAllowedYouTubeChatNavigation(url, activeSourceUrl);
     }
 
     return isAllowedWebViewNavigation(url, sourceUrl, chat.platform);
@@ -150,7 +163,11 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                     src={embedUrl}
                     style={{ width: "100%", height: "100%", border: "none", backgroundColor: themeColors.background } as any}
                     allow="autoplay"
-                    sandbox="allow-scripts allow-same-origin allow-forms allow-popups"
+                    sandbox={
+                      chat.platform === "youtube"
+                        ? "allow-scripts allow-same-origin allow-forms"
+                        : "allow-scripts allow-same-origin allow-forms allow-popups"
+                    }
                     referrerPolicy="strict-origin-when-cross-origin"
                   />
                 )}

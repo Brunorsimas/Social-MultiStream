@@ -14,7 +14,9 @@ import { getApiUrl } from "@/lib/api-url";
 import { getWebChatEndpoint } from "@/lib/web-chat-endpoint";
 import {
   getYouTubeChatRedirect,
+  isAllowedYouTubeChatNavigation,
   isYouTubeLiveChatUrl,
+  shouldIgnoreYouTubeLoadEnd,
 } from "@/lib/chat-url";
 import {
   getWebViewOriginWhitelist,
@@ -176,14 +178,21 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
   const loadHadErrorRef = useRef(false);
   const embedUrl = getChatEmbedUrl(chat.url);
   const [sourceUrl, setSourceUrl] = useState(embedUrl);
+  const sourceUrlRef = useRef(embedUrl);
   const isKick = chat.platform === "kick";
   const shareCookies = shouldShareWebViewCookies(sourceUrl, chat.platform);
 
   useWebChatSSE(chat, onStatusChange);
 
   useEffect(() => {
+    sourceUrlRef.current = embedUrl;
     setSourceUrl(embedUrl);
   }, [embedUrl]);
+
+  const replaceSourceUrl = useCallback((nextUrl: string) => {
+    sourceUrlRef.current = nextUrl;
+    setSourceUrl(nextUrl);
+  }, []);
 
   const injectedJS = useMemo(() => {
     const scraperScript = getScraperForPlatform(chat.platform, chat.id, chat.name);
@@ -221,16 +230,18 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
   const handleNavigationRequest = useCallback(
     ({ url }: { url: string }) => {
       if (chat.platform === "youtube") {
-        const redirectedChatUrl = getYouTubeChatRedirect(sourceUrl, url);
+        const activeSourceUrl = sourceUrlRef.current;
+        const redirectedChatUrl = getYouTubeChatRedirect(activeSourceUrl, url);
         if (redirectedChatUrl) {
-          setSourceUrl(redirectedChatUrl);
+          replaceSourceUrl(redirectedChatUrl);
           return false;
         }
+        return isAllowedYouTubeChatNavigation(url, activeSourceUrl);
       }
 
       return isAllowedWebViewNavigation(url, sourceUrl, chat.platform);
     },
-    [chat.platform, sourceUrl],
+    [chat.platform, replaceSourceUrl, sourceUrl],
   );
 
   if (Platform.OS === "web") {
@@ -256,13 +267,16 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
           if (loadHadErrorRef.current) return;
 
           if (chat.platform === "youtube") {
-            const finalUrl = nativeEvent.url || sourceUrl;
+            const activeSourceUrl = sourceUrlRef.current;
+            const finalUrl = nativeEvent.url || activeSourceUrl;
+            if (shouldIgnoreYouTubeLoadEnd(activeSourceUrl, finalUrl)) return;
+
             const redirectedChatUrl = getYouTubeChatRedirect(
-              sourceUrl,
+              activeSourceUrl,
               finalUrl,
             );
             if (redirectedChatUrl) {
-              setSourceUrl(redirectedChatUrl);
+              replaceSourceUrl(redirectedChatUrl);
               onStatusChange?.(
                 chat.id,
                 "connecting",

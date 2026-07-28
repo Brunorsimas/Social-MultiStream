@@ -5,7 +5,9 @@ import {
   getYouTubeChatRedirect,
   getTwitchChannelName,
   getYouTubeChatTarget,
+  isAllowedYouTubeChatNavigation,
   isYouTubeLiveChatUrl,
+  shouldIgnoreYouTubeLoadEnd,
 } from "../lib/chat-url.ts";
 import { getWebChatEndpoint } from "../lib/web-chat-endpoint.ts";
 import { parseTwitchPrivmsg } from "../server/twitch-chat.ts";
@@ -77,6 +79,27 @@ test("redirects a YouTube channel live page to the embedded live chat", () => {
     null,
   );
   assert.equal(
+    getYouTubeChatRedirect(
+      "https://www.youtube.com/@example/live?dark_theme=1",
+      "intent://watch?v=abc123XYZ_-#Intent;scheme=https;package=com.google.android.youtube;end",
+    ),
+    "https://www.youtube.com/live_chat?v=abc123XYZ_-&dark_theme=1&is_popout=1",
+  );
+  assert.equal(
+    getYouTubeChatRedirect(
+      "https://www.youtube.com/@example/live?dark_theme=1",
+      "vnd.youtube://AbC123XYZ_-",
+    ),
+    "https://www.youtube.com/live_chat?v=AbC123XYZ_-&dark_theme=1&is_popout=1",
+  );
+  assert.equal(
+    getYouTubeChatRedirect(
+      "https://www.youtube.com/live_chat?v=abc123XYZ_-&dark_theme=1&is_popout=1",
+      "https://www.youtube.com/watch?v=different1",
+    ),
+    null,
+  );
+  assert.equal(
     isYouTubeLiveChatUrl(
       "https://www.youtube.com/live_chat?v=abc123XYZ_-&is_popout=1",
     ),
@@ -84,6 +107,105 @@ test("redirects a YouTube channel live page to the embedded live chat", () => {
   );
   assert.equal(
     isYouTubeLiveChatUrl("https://www.youtube.com/@example/live"),
+    false,
+  );
+});
+
+test("keeps the YouTube WebView restricted to the internal chat", () => {
+  const liveChatUrl =
+    "https://www.youtube.com/live_chat?v=abc123XYZ_-&is_popout=1";
+  assert.equal(
+    isAllowedYouTubeChatNavigation(liveChatUrl, liveChatUrl),
+    true,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "https://www.youtube.com/@Example/live",
+      "https://www.youtube.com/@example/live?dark_theme=1",
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "https://www.youtube.com/watch?v=abc123XYZ_-",
+      liveChatUrl,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "https://www.youtube.com/live_chat?v=different1",
+      liveChatUrl,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "https://www.youtube.com/@example/videos",
+      "https://www.youtube.com/@example/live?dark_theme=1",
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "https://accounts.google.com/login",
+      liveChatUrl,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "intent://watch?v=abc123XYZ_-",
+      liveChatUrl,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "youtube://watch?v=abc123XYZ_-",
+      liveChatUrl,
+    ),
+    false,
+  );
+  assert.equal(
+    isAllowedYouTubeChatNavigation(
+      "vnd.youtube://abc123XYZ_-",
+      liveChatUrl,
+    ),
+    false,
+  );
+  for (const externalUrl of [
+    "market://details?id=com.google.android.youtube",
+    "tel:+5511999999999",
+    "mailto:test@example.com",
+    "data:text/html,blocked",
+  ]) {
+    assert.equal(
+      isAllowedYouTubeChatNavigation(externalUrl, liveChatUrl),
+      false,
+    );
+  }
+});
+
+test("ignores stale YouTube load events after resolving the live chat", () => {
+  const liveChatUrl =
+    "https://www.youtube.com/live_chat?v=abc123XYZ_-&is_popout=1";
+  assert.equal(
+    shouldIgnoreYouTubeLoadEnd(
+      liveChatUrl,
+      "https://www.youtube.com/@example/live",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldIgnoreYouTubeLoadEnd(
+      liveChatUrl,
+      "https://www.youtube.com/live_chat?v=different1",
+    ),
+    true,
+  );
+  assert.equal(
+    shouldIgnoreYouTubeLoadEnd(liveChatUrl, liveChatUrl),
     false,
   );
 });

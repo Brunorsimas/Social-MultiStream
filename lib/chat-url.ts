@@ -131,6 +131,30 @@ function getYouTubeVideoId(url: URL): string | null {
   return candidate && /^[a-z\d_-]{6,20}$/i.test(candidate) ? candidate : null;
 }
 
+function getYouTubeExternalNavigationVideoId(rawUrl: string): string | null {
+  try {
+    const url = new URL(rawUrl);
+    if (!["intent:", "youtube:", "vnd.youtube:"].includes(url.protocol)) {
+      return null;
+    }
+
+    let candidate = url.searchParams.get("v");
+    if (!candidate && url.protocol === "vnd.youtube:") {
+      candidate =
+        /^vnd\.youtube:(?:\/\/)?([a-z\d_-]{6,20})(?:[?#]|$)/i.exec(
+          rawUrl,
+        )?.[1] ??
+        firstPathSegment(url);
+    }
+
+    return candidate && /^[a-z\d_-]{6,20}$/i.test(candidate)
+      ? candidate
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export type YouTubeChatTarget =
   | { type: "video"; value: string }
   | { type: "handle"; value: string };
@@ -159,9 +183,23 @@ export function getYouTubeChatRedirect(
   candidateUrl: string,
 ): string | null {
   const target = getYouTubeChatTarget(candidateUrl);
-  if (target?.type !== "video") return null;
+  const videoId =
+    target?.type === "video"
+      ? target.value
+      : getYouTubeExternalNavigationVideoId(candidateUrl);
+  if (!videoId) return null;
 
-  const nextUrl = getChatEmbedUrl(candidateUrl);
+  const currentTarget = getYouTubeChatTarget(currentSourceUrl);
+  if (
+    currentTarget?.type === "video" &&
+    currentTarget.value !== videoId
+  ) {
+    return null;
+  }
+
+  const nextUrl = getChatEmbedUrl(
+    `https://www.youtube.com/watch?v=${encodeURIComponent(videoId)}`,
+  );
   return nextUrl !== currentSourceUrl && nextUrl.includes("/live_chat?")
     ? nextUrl
     : null;
@@ -173,6 +211,49 @@ export function isYouTubeLiveChatUrl(rawUrl: string): boolean {
 
   const url = new URL(normalized);
   return url.pathname === "/live_chat" && getYouTubeVideoId(url) !== null;
+}
+
+export function isAllowedYouTubeChatNavigation(
+  candidateUrl: string,
+  currentSourceUrl: string,
+): boolean {
+  const currentTarget = getYouTubeChatTarget(currentSourceUrl);
+  const candidateTarget = getYouTubeChatTarget(candidateUrl);
+
+  if (isYouTubeLiveChatUrl(candidateUrl)) {
+    return Boolean(
+      currentTarget?.type === "video" &&
+        candidateTarget?.type === "video" &&
+        currentTarget.value === candidateTarget.value,
+    );
+  }
+
+  const normalizedCandidate = normalizeChatUrl(candidateUrl);
+  if (!normalizedCandidate) return false;
+  const candidatePath = new URL(normalizedCandidate).pathname.toLowerCase();
+
+  return Boolean(
+    currentTarget?.type === "handle" &&
+      candidateTarget?.type === "handle" &&
+      currentTarget.value.toLowerCase() === candidateTarget.value.toLowerCase() &&
+      candidatePath === `/@${candidateTarget.value}/live`.toLowerCase(),
+  );
+}
+
+export function shouldIgnoreYouTubeLoadEnd(
+  activeSourceUrl: string,
+  loadedUrl: string,
+): boolean {
+  if (!isYouTubeLiveChatUrl(activeSourceUrl)) return false;
+
+  const activeTarget = getYouTubeChatTarget(activeSourceUrl);
+  const loadedTarget = getYouTubeChatTarget(loadedUrl);
+  return !(
+    isYouTubeLiveChatUrl(loadedUrl) &&
+    activeTarget?.type === "video" &&
+    loadedTarget?.type === "video" &&
+    activeTarget.value === loadedTarget.value
+  );
 }
 
 export function isResolvableChatUrl(rawUrl: string, selectedPlatform?: string): boolean {

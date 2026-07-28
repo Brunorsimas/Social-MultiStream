@@ -34,6 +34,20 @@ test("restringe navegação aos domínios da plataforma", () => {
     ),
     false,
   );
+  assert.deepEqual(
+    getWebViewOriginWhitelist(
+      "https://www.youtube.com/live_chat?v=abc123",
+      "youtube",
+    ),
+    ["*"],
+  );
+  assert.deepEqual(
+    getWebViewOriginWhitelist(
+      "https://www.twitch.tv/example/chat",
+      "twitch",
+    ),
+    ["https://twitch.tv/*", "https://*.twitch.tv/*"],
+  );
 });
 
 test("mantém canais personalizados restritos à origem configurada", () => {

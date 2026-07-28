@@ -78,7 +78,14 @@ export function getWebViewOriginWhitelist(
   initialUrl: string,
   platform: string,
 ): string[] {
-  const domains = PLATFORM_DOMAINS[platform.toLowerCase()];
+  const normalizedPlatform = platform.toLowerCase();
+
+  // react-native-webview opens URLs that fail this whitelist through Linking.
+  // YouTube emits intent:// and vnd.youtube:// URLs on Android, so let every
+  // scheme reach onShouldStartLoadWithRequest, where it is rejected in-app.
+  if (normalizedPlatform === "youtube") return ["*"];
+
+  const domains = PLATFORM_DOMAINS[normalizedPlatform];
   if (domains?.length) {
     return domains.flatMap((domain) => [
       `https://${domain}/*`,
