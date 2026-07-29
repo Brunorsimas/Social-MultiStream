@@ -19,6 +19,11 @@ import {
   getWebViewOriginWhitelist,
   isAllowedWebViewNavigation,
 } from "@/lib/webview-security";
+import {
+  getYouTubeChatUrlFromMessage,
+  getYouTubeVideoIdExtractorScript,
+  YOUTUBE_VIDEO_ID_RESOLUTION_TIMEOUT_MS,
+} from "@/lib/youtube-webview";
 
 interface ChatWebViewProps {
   chat: ChatConfig;
@@ -30,6 +35,7 @@ interface ChatWebViewProps {
 
 export default function ChatWebView({ chat, showHeader = true, compact = false, onPin, fontSize = 14 }: ChatWebViewProps) {
   const webViewRef = useRef<WebView>(null);
+  const youtubeResolveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
   const [webReloadKey, setWebReloadKey] = useState(0);
@@ -45,17 +51,32 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
     setSourceUrl(nextUrl);
   }, []);
 
+  const clearYouTubeResolveTimer = useCallback(() => {
+    if (!youtubeResolveTimerRef.current) return;
+    clearTimeout(youtubeResolveTimerRef.current);
+    youtubeResolveTimerRef.current = null;
+  }, []);
+
   useEffect(() => {
+    clearYouTubeResolveTimer();
     replaceSourceUrl(embedUrl);
     setLoading(true);
     setError(false);
-  }, [embedUrl, replaceSourceUrl]);
+  }, [clearYouTubeResolveTimer, embedUrl, replaceSourceUrl]);
+
+  useEffect(
+    () => () => clearYouTubeResolveTimer(),
+    [clearYouTubeResolveTimer],
+  );
 
   const handleNavigationRequest = ({ url }: { url: string }) => {
     if (chat.platform === "youtube") {
       const activeSourceUrl = sourceUrlRef.current;
       const redirectedChatUrl = getYouTubeChatRedirect(activeSourceUrl, url);
       if (redirectedChatUrl) {
+        clearYouTubeResolveTimer();
+        setLoading(true);
+        setError(false);
         replaceSourceUrl(redirectedChatUrl);
         return false;
       }
@@ -76,18 +97,62 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
         finalUrl,
       );
       if (redirectedChatUrl) {
+        clearYouTubeResolveTimer();
+        setLoading(true);
+        setError(false);
         replaceSourceUrl(redirectedChatUrl);
         return;
       }
       if (!isYouTubeLiveChatUrl(finalUrl)) {
-        setError(true);
-        setLoading(false);
+        clearYouTubeResolveTimer();
+        setLoading(true);
+        setError(false);
+        webViewRef.current?.injectJavaScript(
+          getYouTubeVideoIdExtractorScript(activeSourceUrl),
+        );
+        youtubeResolveTimerRef.current = setTimeout(() => {
+          youtubeResolveTimerRef.current = null;
+          if (!isYouTubeLiveChatUrl(sourceUrlRef.current)) {
+            setError(true);
+            setLoading(false);
+          }
+        }, YOUTUBE_VIDEO_ID_RESOLUTION_TIMEOUT_MS);
         return;
       }
+
+      clearYouTubeResolveTimer();
+      setError(false);
     }
 
     setLoading(false);
   };
+
+  const handleMessage = useCallback(
+    ({
+      nativeEvent,
+    }: {
+      nativeEvent: { data?: string; url?: string };
+    }) => {
+      if (chat.platform !== "youtube") return;
+
+      const redirectedChatUrl = getYouTubeChatUrlFromMessage(
+        sourceUrlRef.current,
+        nativeEvent.data,
+        nativeEvent.url,
+      );
+      if (!redirectedChatUrl) return;
+
+      clearYouTubeResolveTimer();
+      setError(false);
+      setLoading(true);
+      replaceSourceUrl(redirectedChatUrl);
+    },
+    [
+      chat.platform,
+      clearYouTubeResolveTimer,
+      replaceSourceUrl,
+    ],
+  );
 
   const injectedCSS = `
     (function() {
@@ -183,11 +248,18 @@ export default function ChatWebView({ chat, showHeader = true, compact = false, 
           </View>
         ) : (
           <WebView
+            key={`${chat.id}:${chat.platform}:${chat.url}`}
             ref={webViewRef}
             source={{ uri: sourceUrl }}
             style={styles.webview}
+            onLoadStart={() => {
+              clearYouTubeResolveTimer();
+              setLoading(true);
+            }}
             onLoadEnd={handleLoadEnd}
+            onMessage={handleMessage}
             onError={() => {
+              clearYouTubeResolveTimer();
               setError(true);
               setLoading(false);
             }}

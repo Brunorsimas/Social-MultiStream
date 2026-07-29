@@ -1,4 +1,11 @@
-import React, { useMemo, useRef, useState } from "react";
+import React, {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { View, Text, Pressable, StyleSheet, ActivityIndicator, Platform, FlatList } from "react-native";
 import { WebView } from "react-native-webview";
 import { Ionicons } from "@expo/vector-icons";
@@ -19,6 +26,11 @@ import {
   getWebViewOriginWhitelist,
   isAllowedWebViewNavigation,
 } from "@/lib/webview-security";
+import {
+  getYouTubeChatUrlFromMessage,
+  getYouTubeVideoIdExtractorScript,
+  YOUTUBE_VIDEO_ID_RESOLUTION_TIMEOUT_MS,
+} from "@/lib/youtube-webview";
 
 interface MergedChatViewProps {
   chats: ChatConfig[];
@@ -48,6 +60,17 @@ function TabItem({ chat, isActive, onPress }: TabItemProps) {
   );
 }
 
+function getMergedChatSourceUrl(chat: ChatConfig): string {
+  return getChatEmbedUrl(
+    chat.url,
+    Platform.OS === "web" ? getCurrentEmbedDomain() : undefined,
+  );
+}
+
+function getMergedChatSourceKey(chat: ChatConfig): string {
+  return `${chat.platform}:${getMergedChatSourceUrl(chat)}`;
+}
+
 export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewProps) {
   const { themeColors } = useChats();
   const styles = useMemo(() => createStyles(themeColors), [themeColors]);
@@ -58,6 +81,65 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
   );
   const [resolvedUrls, setResolvedUrls] = useState<Record<string, string>>({});
   const resolvedUrlsRef = useRef<Record<string, string>>({});
+  const configuredSourceKeysRef = useRef<Record<string, string>>(
+    Object.fromEntries(
+      chats.map((chat) => [chat.id, getMergedChatSourceKey(chat)]),
+    ),
+  );
+  const youtubeResolveTimersRef = useRef<
+    Record<string, ReturnType<typeof setTimeout>>
+  >({});
+
+  const clearYouTubeResolveTimer = useCallback((chatId: string) => {
+    const timer = youtubeResolveTimersRef.current[chatId];
+    if (!timer) return;
+    clearTimeout(timer);
+    delete youtubeResolveTimersRef.current[chatId];
+  }, []);
+
+  useEffect(
+    () => () => {
+      Object.values(youtubeResolveTimersRef.current).forEach(clearTimeout);
+      youtubeResolveTimersRef.current = {};
+    },
+    [],
+  );
+
+  useLayoutEffect(() => {
+    const previousKeys = configuredSourceKeysRef.current;
+    const nextKeys = Object.fromEntries(
+      chats.map((chat) => [chat.id, getMergedChatSourceKey(chat)]),
+    );
+    const changedIds = new Set([
+      ...Object.keys(previousKeys).filter(
+        (chatId) => previousKeys[chatId] !== nextKeys[chatId],
+      ),
+      ...Object.keys(nextKeys).filter(
+        (chatId) => previousKeys[chatId] !== nextKeys[chatId],
+      ),
+    ]);
+
+    configuredSourceKeysRef.current = nextKeys;
+    if (changedIds.size === 0) return;
+
+    changedIds.forEach((chatId) => {
+      clearYouTubeResolveTimer(chatId);
+      delete resolvedUrlsRef.current[chatId];
+    });
+    setResolvedUrls((previous) => {
+      const next = { ...previous };
+      changedIds.forEach((chatId) => delete next[chatId]);
+      return next;
+    });
+    setLoadingStates((previous) =>
+      Object.fromEntries(
+        chats.map((chat) => [
+          chat.id,
+          changedIds.has(chat.id) ? true : (previous[chat.id] ?? true),
+        ]),
+      ),
+    );
+  }, [chats, clearYouTubeResolveTimer]);
 
   const safeIndex = Math.min(activeIndex, chats.length - 1);
   const activeChat = chats[safeIndex] || chats[0];
@@ -75,9 +157,12 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
 
   const handleLoadEnd = (
     chat: ChatConfig,
+    sourceKey: string,
     sourceUrl: string,
     finalUrl: string,
   ) => {
+    if (configuredSourceKeysRef.current[chat.id] !== sourceKey) return;
+
     if (chat.platform === "youtube") {
       const activeSourceUrl = resolvedUrlsRef.current[chat.id] || sourceUrl;
       if (shouldIgnoreYouTubeLoadEnd(activeSourceUrl, finalUrl)) return;
@@ -87,32 +172,91 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
         finalUrl,
       );
       if (redirectedChatUrl) {
+        clearYouTubeResolveTimer(chat.id);
         resolvedUrlsRef.current[chat.id] = redirectedChatUrl;
         setResolvedUrls((prev) => ({
           ...prev,
           [chat.id]: redirectedChatUrl,
         }));
+        setLoadingStates((prev) => ({ ...prev, [chat.id]: true }));
         return;
       }
       if (!isYouTubeLiveChatUrl(finalUrl)) {
-        setLoadingStates((prev) => ({ ...prev, [chat.id]: false }));
+        clearYouTubeResolveTimer(chat.id);
+        setLoadingStates((prev) => ({ ...prev, [chat.id]: true }));
+        webViewRefs.current[chat.id]?.injectJavaScript(
+          getYouTubeVideoIdExtractorScript(activeSourceUrl),
+        );
+        youtubeResolveTimersRef.current[chat.id] = setTimeout(() => {
+          delete youtubeResolveTimersRef.current[chat.id];
+          if (
+            configuredSourceKeysRef.current[chat.id] !== sourceKey
+          ) {
+            return;
+          }
+          const currentUrl =
+            resolvedUrlsRef.current[chat.id] || sourceUrl;
+          if (!isYouTubeLiveChatUrl(currentUrl)) {
+            setLoadingStates((prev) => ({ ...prev, [chat.id]: false }));
+          }
+        }, YOUTUBE_VIDEO_ID_RESOLUTION_TIMEOUT_MS);
         return;
       }
+
+      clearYouTubeResolveTimer(chat.id);
     }
 
     setLoadingStates((prev) => ({ ...prev, [chat.id]: false }));
   };
 
-  const handleNavigationRequest = (chat: ChatConfig, sourceUrl: string, url: string) => {
+  const handleMessage = (
+    chat: ChatConfig,
+    sourceKey: string,
+    sourceUrl: string,
+    data: unknown,
+    messageSourceUrl: unknown,
+  ) => {
+    if (configuredSourceKeysRef.current[chat.id] !== sourceKey) return;
+    if (chat.platform !== "youtube") return;
+
+    const activeSourceUrl = resolvedUrlsRef.current[chat.id] || sourceUrl;
+    const redirectedChatUrl = getYouTubeChatUrlFromMessage(
+      activeSourceUrl,
+      data,
+      messageSourceUrl,
+    );
+    if (!redirectedChatUrl) return;
+
+    clearYouTubeResolveTimer(chat.id);
+    resolvedUrlsRef.current[chat.id] = redirectedChatUrl;
+    setResolvedUrls((prev) => ({
+      ...prev,
+      [chat.id]: redirectedChatUrl,
+    }));
+    setLoadingStates((prev) => ({ ...prev, [chat.id]: true }));
+  };
+
+  const handleNavigationRequest = (
+    chat: ChatConfig,
+    sourceKey: string,
+    sourceUrl: string,
+    url: string,
+  ) => {
+    if (configuredSourceKeysRef.current[chat.id] !== sourceKey) {
+      return false;
+    }
+
     if (chat.platform === "youtube") {
       const activeSourceUrl = resolvedUrlsRef.current[chat.id] || sourceUrl;
       const redirectedChatUrl = getYouTubeChatRedirect(activeSourceUrl, url);
       if (redirectedChatUrl) {
+        clearYouTubeResolveTimer(chat.id);
         resolvedUrlsRef.current[chat.id] = redirectedChatUrl;
         setResolvedUrls((prev) => ({
           ...prev,
           [chat.id]: redirectedChatUrl,
         }));
+        setLoadingStates((prev) => ({ ...prev, [chat.id]: true }));
         return false;
       }
       return isAllowedYouTubeChatNavigation(url, activeSourceUrl);
@@ -142,7 +286,14 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
 
       <View style={styles.chatContainer}>
         {chats.map((chat, index) => {
-          const embedUrl = getChatEmbedUrl(chat.url, Platform.OS === "web" ? getCurrentEmbedDomain() : undefined);
+          const embedUrl = getMergedChatSourceUrl(chat);
+          const sourceKey = `${chat.platform}:${embedUrl}`;
+          const resolvedUrl =
+            configuredSourceKeysRef.current[chat.id] ===
+            sourceKey
+              ? resolvedUrls[chat.id]
+              : undefined;
+          const sourceUrl = resolvedUrl || embedUrl;
           const kickChannel = chat.platform === "kick" ? getKickChannelName(chat.url) : null;
           const isVisible = index === safeIndex;
 
@@ -190,20 +341,58 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 </View>
               )}
               <WebView
+                key={sourceKey}
                 ref={(ref) => { webViewRefs.current[chat.id] = ref; }}
-                source={{ uri: resolvedUrls[chat.id] || embedUrl }}
+                source={{ uri: sourceUrl }}
                 style={styles.webview}
+                onLoadStart={() => {
+                  if (
+                    configuredSourceKeysRef.current[chat.id] !==
+                    sourceKey
+                  ) {
+                    return;
+                  }
+                  clearYouTubeResolveTimer(chat.id);
+                  setLoadingStates((prev) => ({
+                    ...prev,
+                    [chat.id]: true,
+                  }));
+                }}
                 onLoadEnd={({ nativeEvent }) =>
                   handleLoadEnd(
                     chat,
-                    resolvedUrls[chat.id] || embedUrl,
+                    sourceKey,
+                    sourceUrl,
+                    nativeEvent.url || sourceUrl,
+                  )
+                }
+                onMessage={({ nativeEvent }) =>
+                  handleMessage(
+                    chat,
+                    sourceKey,
+                    sourceUrl,
+                    nativeEvent.data,
                     nativeEvent.url,
                   )
                 }
+                onError={() => {
+                  if (
+                    configuredSourceKeysRef.current[chat.id] !==
+                    sourceKey
+                  ) {
+                    return;
+                  }
+                  clearYouTubeResolveTimer(chat.id);
+                  setLoadingStates((prev) => ({
+                    ...prev,
+                    [chat.id]: false,
+                  }));
+                }}
                 onShouldStartLoadWithRequest={({ url }) =>
                   handleNavigationRequest(
                     chat,
-                    resolvedUrls[chat.id] || embedUrl,
+                    sourceKey,
+                    sourceUrl,
                     url,
                   )
                 }
@@ -215,7 +404,7 @@ export default function MergedChatView({ chats, fontSize = 14 }: MergedChatViewP
                 startInLoadingState={false}
                 setSupportMultipleWindows={false}
                 originWhitelist={getWebViewOriginWhitelist(
-                  resolvedUrls[chat.id] || embedUrl,
+                  sourceUrl,
                   chat.platform,
                 )}
                 mixedContentMode="never"

@@ -24,6 +24,11 @@ import {
   normalizeCollectorEvent,
   shouldShareWebViewCookies,
 } from "@/lib/webview-security";
+import {
+  getYouTubeChatUrlFromMessage,
+  getYouTubeVideoIdExtractorScript,
+  YOUTUBE_VIDEO_ID_RESOLUTION_TIMEOUT_MS,
+} from "@/lib/youtube-webview";
 
 interface HiddenChatCollectorProps {
   chat: ChatConfig;
@@ -176,6 +181,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
 }: HiddenChatCollectorProps) {
   const webViewRef = useRef<WebView>(null);
   const loadHadErrorRef = useRef(false);
+  const ytResolveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const embedUrl = getChatEmbedUrl(chat.url);
   const [sourceUrl, setSourceUrl] = useState(embedUrl);
   const sourceUrlRef = useRef(embedUrl);
@@ -184,10 +190,22 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
 
   useWebChatSSE(chat, onStatusChange);
 
+  const clearYouTubeResolveTimer = useCallback(() => {
+    if (!ytResolveTimerRef.current) return;
+    clearTimeout(ytResolveTimerRef.current);
+    ytResolveTimerRef.current = null;
+  }, []);
+
   useEffect(() => {
+    clearYouTubeResolveTimer();
     sourceUrlRef.current = embedUrl;
     setSourceUrl(embedUrl);
-  }, [embedUrl]);
+  }, [clearYouTubeResolveTimer, embedUrl]);
+
+  useEffect(
+    () => () => clearYouTubeResolveTimer(),
+    [clearYouTubeResolveTimer],
+  );
 
   const replaceSourceUrl = useCallback((nextUrl: string) => {
     sourceUrlRef.current = nextUrl;
@@ -213,9 +231,25 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
 
   const handleMessage = useCallback(
     (event: any) => {
+      const rawData = event?.nativeEvent?.data;
+
+      if (chat.platform === "youtube") {
+        const redirectedChatUrl = getYouTubeChatUrlFromMessage(
+          sourceUrlRef.current,
+          rawData,
+          event?.nativeEvent?.url,
+        );
+        if (redirectedChatUrl) {
+          clearYouTubeResolveTimer();
+          replaceSourceUrl(redirectedChatUrl);
+          onStatusChange?.(chat.id, "connecting", "Opening the live chat");
+          return;
+        }
+      }
+
       const messages = normalizeCollectorEvent(
-        event?.nativeEvent?.data,
-        sourceUrl,
+        rawData,
+        sourceUrlRef.current,
         event?.nativeEvent?.url,
         chat,
       );
@@ -224,7 +258,12 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
         globalAggregator.addMessages(messages);
       }
     },
-    [chat, sourceUrl, onStatusChange]
+    [
+      chat,
+      clearYouTubeResolveTimer,
+      onStatusChange,
+      replaceSourceUrl,
+    ],
   );
 
   const handleNavigationRequest = useCallback(
@@ -233,6 +272,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
         const activeSourceUrl = sourceUrlRef.current;
         const redirectedChatUrl = getYouTubeChatRedirect(activeSourceUrl, url);
         if (redirectedChatUrl) {
+          clearYouTubeResolveTimer();
           replaceSourceUrl(redirectedChatUrl);
           return false;
         }
@@ -241,7 +281,12 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
 
       return isAllowedWebViewNavigation(url, sourceUrl, chat.platform);
     },
-    [chat.platform, replaceSourceUrl, sourceUrl],
+    [
+      chat.platform,
+      clearYouTubeResolveTimer,
+      replaceSourceUrl,
+      sourceUrl,
+    ],
   );
 
   if (Platform.OS === "web") {
@@ -255,11 +300,13 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
       style={styles.collectorContainer}
     >
       <WebView
+        key={`${chat.id}:${chat.platform}:${chat.url}`}
         ref={webViewRef}
         source={{ uri: sourceUrl }}
         style={styles.collectorWebView}
         onMessage={handleMessage}
         onLoadStart={() => {
+          clearYouTubeResolveTimer();
           loadHadErrorRef.current = false;
           onStatusChange?.(chat.id, "connecting");
         }}
@@ -276,6 +323,7 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
               finalUrl,
             );
             if (redirectedChatUrl) {
+              clearYouTubeResolveTimer();
               replaceSourceUrl(redirectedChatUrl);
               onStatusChange?.(
                 chat.id,
@@ -285,22 +333,43 @@ const HiddenChatCollector = React.memo(function HiddenChatCollector({
               return;
             }
             if (!isYouTubeLiveChatUrl(finalUrl)) {
+              // The loaded page is not the live_chat iframe (e.g. a @handle/live
+              // page). Inject a script to extract the videoId from the HTML so
+              // we can redirect to the correct live_chat URL.
               onStatusChange?.(
                 chat.id,
-                "error",
-                "No active YouTube live chat was found for this channel",
+                "connecting",
+                "Resolving live stream",
+              );
+              clearYouTubeResolveTimer();
+              ytResolveTimerRef.current = setTimeout(() => {
+                ytResolveTimerRef.current = null;
+                if (!isYouTubeLiveChatUrl(sourceUrlRef.current)) {
+                  onStatusChange?.(
+                    chat.id,
+                    "error",
+                    "No active YouTube live chat was found for this channel",
+                  );
+                }
+              }, YOUTUBE_VIDEO_ID_RESOLUTION_TIMEOUT_MS);
+              webViewRef.current?.injectJavaScript(
+                getYouTubeVideoIdExtractorScript(activeSourceUrl),
               );
               return;
             }
+
+            clearYouTubeResolveTimer();
           }
 
           onStatusChange?.(chat.id, "connected");
         }}
         onError={() => {
+          clearYouTubeResolveTimer();
           loadHadErrorRef.current = true;
           onStatusChange?.(chat.id, "error", "Unable to load chat")
         }}
         onHttpError={({ nativeEvent }) => {
+          clearYouTubeResolveTimer();
           loadHadErrorRef.current = true;
           onStatusChange?.(
             chat.id,
