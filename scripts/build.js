@@ -104,6 +104,7 @@ async function startMetro(expoPublicDomain) {
   console.log(`Setting EXPO_PUBLIC_DOMAIN=${expoPublicDomain}`);
   const env = {
     ...process.env,
+    EXPO_OFFLINE: "1",
     EXPO_PUBLIC_DOMAIN: expoPublicDomain,
   };
   const expoCliPath = require.resolve("expo/bin/cli");

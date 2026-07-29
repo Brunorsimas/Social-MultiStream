@@ -6,9 +6,13 @@ import { KeyboardProvider } from "react-native-keyboard-controller";
 import { useFonts, Inter_400Regular, Inter_600SemiBold } from "@expo-google-fonts/inter";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { ChatProvider, useChats } from "@/lib/chat-context";
+import {
+  isAppStartupReady,
+  STARTUP_FONT_TIMEOUT_MS,
+} from "@/lib/startup";
 import { StatusBar } from "expo-status-bar";
 
-SplashScreen.preventAutoHideAsync();
+void SplashScreen.preventAutoHideAsync().catch(() => undefined);
 
 function RootLayoutNav() {
   const { themeColors, settings } = useChats();
@@ -34,18 +38,34 @@ function RootLayoutNav() {
 }
 
 export default function RootLayout() {
+  const [fontWaitExpired, setFontWaitExpired] = React.useState(false);
   const [fontsLoaded, fontError] = useFonts({
     Inter_400Regular,
     Inter_600SemiBold,
   });
+  const startupReady = isAppStartupReady(
+    fontsLoaded,
+    fontError,
+    fontWaitExpired,
+  );
 
   useEffect(() => {
-    if (fontsLoaded || fontError) {
-      SplashScreen.hideAsync();
-    }
+    if (fontsLoaded || fontError) return;
+
+    const timeout = setTimeout(
+      () => setFontWaitExpired(true),
+      STARTUP_FONT_TIMEOUT_MS,
+    );
+    return () => clearTimeout(timeout);
   }, [fontsLoaded, fontError]);
 
-  if (!fontsLoaded && !fontError) return null;
+  useEffect(() => {
+    if (startupReady) {
+      void SplashScreen.hideAsync().catch(() => undefined);
+    }
+  }, [startupReady]);
+
+  if (!startupReady) return null;
 
   return (
     <ErrorBoundary>

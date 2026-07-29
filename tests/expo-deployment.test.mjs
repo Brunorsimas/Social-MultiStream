@@ -27,6 +27,10 @@ const {
   PUBLIC_ORIGIN_PLACEHOLDER: BUILD_ORIGIN_PLACEHOLDER,
   rewriteBundleLocalUrls,
 } = require("../scripts/build.js");
+const {
+  createExpoDevEnvironment,
+  normalizeHost,
+} = require("../scripts/expo-dev.js");
 
 test("usa somente um domínio público no deployment", () => {
   assert.equal(
@@ -72,6 +76,55 @@ test("publica somente a porta do servidor Express", () => {
     replitConfig,
     /\[\[ports\]\]\s+localPort\s*=\s*5000\s+externalPort\s*=\s*80/,
   );
+});
+
+test("não bloqueia o preview reinstalando dependências ou validando a rede", () => {
+  const replitConfig = readFileSync(
+    new URL("../.replit", import.meta.url),
+    "utf8",
+  );
+  const packageJson = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  );
+
+  assert.doesNotMatch(replitConfig, /\bnpm\s+(?:ci|install)\b/);
+  assert.match(
+    replitConfig,
+    /name\s*=\s*"Project"\s+mode\s*=\s*"parallel"[\s\S]*?task\s*=\s*"workflow\.run"\s+args\s*=\s*"Start App"/,
+  );
+  assert.equal(packageJson.scripts["expo:dev"], "node scripts/expo-dev.js");
+});
+
+test("usa o dominio dedicado do Metro no preview Replit", () => {
+  const environment = createExpoDevEnvironment({
+    REPLIT_DEV_DOMAIN: "api-workspace.replit.dev",
+    REPLIT_EXPO_DEV_DOMAIN: "expo-workspace.replit.dev",
+  });
+
+  assert.equal(environment.EXPO_OFFLINE, "1");
+  assert.equal(
+    environment.EXPO_PACKAGER_PROXY_URL,
+    "https://expo-workspace.replit.dev",
+  );
+  assert.equal(
+    environment.REACT_NATIVE_PACKAGER_HOSTNAME,
+    "api-workspace.replit.dev",
+  );
+  assert.equal(environment.EXPO_PUBLIC_DOMAIN, "api-workspace.replit.dev");
+});
+
+test("impede URLs malformadas no manifesto de desenvolvimento", () => {
+  assert.equal(
+    normalizeHost("https://workspace.replit.dev"),
+    "workspace.replit.dev",
+  );
+  assert.equal(normalizeHost("https,workspace.replit.dev"), null);
+  assert.equal(normalizeHost("one.replit.dev,two.replit.dev"), null);
+
+  const localEnvironment = createExpoDevEnvironment({});
+  assert.equal("EXPO_PACKAGER_PROXY_URL" in localEnvironment, false);
+  assert.equal("REACT_NATIVE_PACKAGER_HOSTNAME" in localEnvironment, false);
+  assert.equal("EXPO_PUBLIC_DOMAIN" in localEnvironment, false);
 });
 
 test("mantém o patch HTTPS alinhado à versão instalada do expo-asset", () => {
@@ -246,6 +299,15 @@ test("remove URLs locais do Metro no bundle estático", () => {
     rewritten.match(/https:\/\/expo-public-origin\.invalid/g)?.length,
     2,
   );
+});
+
+test("executa o Metro de build sem depender da rede externa", () => {
+  const buildScript = readFileSync(
+    new URL("../scripts/build.js", import.meta.url),
+    "utf8",
+  );
+
+  assert.match(buildScript, /EXPO_OFFLINE:\s*"1"/);
 });
 
 test("preserva todas as variantes de escala dos assets Metro", () => {
