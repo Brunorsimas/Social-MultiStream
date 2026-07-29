@@ -48,6 +48,44 @@ test("restringe navegação aos domínios da plataforma", () => {
     ),
     ["https://twitch.tv/*", "https://*.twitch.tv/*"],
   );
+  assert.equal(
+    isAllowedWebViewNavigation(
+      "https://fb.watch/example",
+      "https://fb.watch/example",
+      "facebook",
+    ),
+    true,
+  );
+  assert.deepEqual(
+    getWebViewOriginWhitelist(
+      "https://fb.watch/example",
+      "facebook",
+    ),
+    [
+      "https://facebook.com/*",
+      "https://*.facebook.com/*",
+      "https://fb.com/*",
+      "https://*.fb.com/*",
+      "https://fb.watch/*",
+      "https://*.fb.watch/*",
+    ],
+  );
+  assert.equal(
+    isAllowedWebViewNavigation(
+      "https://www.facebook.com/watch/live/example",
+      "https://fb.watch/example",
+      "facebook",
+    ),
+    true,
+  );
+  assert.equal(
+    isAllowedWebViewNavigation(
+      "https://fb.watch/example",
+      "https://www.facebook.com/watch/live/example",
+      "facebook",
+    ),
+    true,
+  );
 });
 
 test("mantém canais personalizados restritos à origem configurada", () => {

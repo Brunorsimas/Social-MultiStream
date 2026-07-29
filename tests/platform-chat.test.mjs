@@ -9,7 +9,10 @@ import {
   isYouTubeLiveChatUrl,
   shouldIgnoreYouTubeLoadEnd,
 } from "../lib/chat-url.ts";
-import { getWebChatEndpoint } from "../lib/web-chat-endpoint.ts";
+import {
+  getWebChatEndpoint,
+  shouldRetryWebChatError,
+} from "../lib/web-chat-endpoint.ts";
 import { parseTwitchPrivmsg } from "../server/twitch-chat.ts";
 import {
   extractYouTubeContinuation,
@@ -45,6 +48,13 @@ test("builds web collectors for Twitch, YouTube and Kick", () => {
     }),
     "/api/kick/chat/example",
   );
+});
+
+test("stops reconnecting when a web chat error is permanent", () => {
+  assert.equal(shouldRetryWebChatError({ retryable: false }), false);
+  assert.equal(shouldRetryWebChatError({ retryable: true }), true);
+  assert.equal(shouldRetryWebChatError({ type: "error" }), true);
+  assert.equal(shouldRetryWebChatError(null), true);
 });
 
 test("extracts validated Twitch and YouTube targets", () => {

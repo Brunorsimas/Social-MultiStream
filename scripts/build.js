@@ -139,8 +139,14 @@ async function startMetro(expoPublicDomain) {
     });
   }
 
-  for (let i = 0; i < 60; i++) {
+  for (let i = 0; i < 180; i++) {
     await new Promise((resolve) => setTimeout(resolve, 1000));
+
+    if (metroProcess.exitCode !== null) {
+      throw new Error(
+        `Metro exited before becoming ready (code ${metroProcess.exitCode})`,
+      );
+    }
 
     const healthy = await checkMetroHealth();
     if (healthy) {
@@ -149,8 +155,16 @@ async function startMetro(expoPublicDomain) {
     }
   }
 
-  console.error("Metro timeout");
-  process.exit(1);
+  throw new Error("Metro did not become ready within 180 seconds");
+}
+
+async function formatHttpError(response) {
+  let details = "";
+  try {
+    details = (await response.text()).trim().slice(0, 16_000);
+  } catch {}
+
+  return `HTTP ${response.status}${details ? `: ${details}` : ""}`;
 }
 
 async function downloadFile(url, outputPath) {
@@ -163,7 +177,7 @@ async function downloadFile(url, outputPath) {
     const response = await fetch(url, { signal: controller.signal });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(await formatHttpError(response));
     }
 
     const file = fs.createWriteStream(outputPath);
@@ -227,7 +241,7 @@ async function downloadManifest(platform) {
     });
 
     if (!response.ok) {
-      throw new Error(`HTTP ${response.status}`);
+      throw new Error(await formatHttpError(response));
     }
 
     const manifest = await response.json();
@@ -348,6 +362,10 @@ function extractAssetsFromBundles(bundles) {
   return Array.from(assetsMap.values());
 }
 
+function rewriteBundleLocalUrls(bundle, baseUrl) {
+  return bundle.replaceAll(`${metroBaseUrl}/`, `${baseUrl}/`);
+}
+
 async function downloadAssets(assets, timestamp) {
   if (assets.length === 0) {
     return 0;
@@ -452,6 +470,7 @@ function updateBundleUrls(timestamp, baseUrl) {
         return `httpServerLocation:"${baseUrl}/${timestamp}/_expo/static/js/assets/${platform}/${decodedPath}"`;
       },
     );
+    bundle = rewriteBundleLocalUrls(bundle, baseUrl);
 
     fs.writeFileSync(bundlePath, bundle);
   };
@@ -632,5 +651,7 @@ module.exports = {
   PUBLIC_ORIGIN_PLACEHOLDER,
   extractAssets,
   extractAssetsFromBundles,
+  formatHttpError,
   rewriteManifestLocalUrl,
+  rewriteBundleLocalUrls,
 };

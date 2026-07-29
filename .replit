@@ -13,10 +13,6 @@ run = ["npm", "run", "server:prod"]
 localPort = 5000
 externalPort = 80
 
-[[ports]]
-localPort = 8081
-externalPort = 8081
-
 [env]
 PORT = "5000"
 
@@ -33,7 +29,7 @@ author = "agent"
 
 [[workflows.workflow.tasks]]
 task = "shell.exec"
-args = "npm install --legacy-peer-deps --prefer-offline --no-audit"
+args = "npm ci --legacy-peer-deps --prefer-offline --no-audit --no-fund"
 
 [[workflows.workflow.tasks]]
 task = "workflow.run"

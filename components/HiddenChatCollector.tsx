@@ -11,7 +11,10 @@ import { ChatConfig, getChatEmbedUrl } from "@/lib/storage";
 import { getKickSocketInterceptor, getScraperForPlatform } from "@/lib/chat-scrapers";
 import { globalAggregator } from "@/lib/message-aggregator";
 import { getApiUrl } from "@/lib/api-url";
-import { getWebChatEndpoint } from "@/lib/web-chat-endpoint";
+import {
+  getWebChatEndpoint,
+  shouldRetryWebChatError,
+} from "@/lib/web-chat-endpoint";
 import {
   getYouTubeChatRedirect,
   isAllowedYouTubeChatNavigation,
@@ -135,7 +138,9 @@ function useWebChatSSE(
                   ? data.message
                   : "Chat unavailable",
               );
-              scheduleReconnect(15_000);
+              if (shouldRetryWebChatError(data)) {
+                scheduleReconnect(15_000);
+              }
             } else if (
               data.type === "connected" ||
               data.type === "subscribed"

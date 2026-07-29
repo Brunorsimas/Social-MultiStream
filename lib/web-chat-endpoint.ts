@@ -5,6 +5,15 @@ import {
   getYouTubeChatTarget,
 } from "./chat-url.ts";
 
+export function shouldRetryWebChatError(payload: unknown): boolean {
+  return (
+    typeof payload !== "object" ||
+    payload === null ||
+    !("retryable" in payload) ||
+    payload.retryable !== false
+  );
+}
+
 export function getWebChatEndpoint(
   chat: Pick<ChatConfig, "platform" | "url">,
 ): string | null {

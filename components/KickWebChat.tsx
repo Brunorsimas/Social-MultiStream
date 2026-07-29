@@ -23,6 +23,7 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
   const [status, setStatus] = useState<"connecting" | "connected" | "error">("connecting");
   const [errorMsg, setErrorMsg] = useState("");
   const flatListRef = useRef<FlatList>(null);
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const addMessage = useCallback((msg: KickMessage) => {
     setMessages((prev) => {
@@ -32,11 +33,22 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
       if (next.length > 300) next.splice(0, next.length - 300);
       return next;
     });
-    setTimeout(() => flatListRef.current?.scrollToEnd({ animated: false }), 50);
+    if (scrollTimerRef.current) clearTimeout(scrollTimerRef.current);
+    scrollTimerRef.current = setTimeout(() => {
+      scrollTimerRef.current = null;
+      flatListRef.current?.scrollToEnd({ animated: false });
+    }, 50);
   }, []);
 
   useEffect(() => {
-    if (!channel) return;
+    setMessages([]);
+    setErrorMsg("");
+    setStatus("connecting");
+    if (!channel) {
+      setStatus("error");
+      setErrorMsg("Canal do Kick inválido");
+      return;
+    }
 
     let es: EventSource | null = null;
     let retryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -58,7 +70,9 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
       setStatus("connecting");
       try {
         const base = getApiUrl().replace(/\/$/, "");
-        es = new EventSource(`${base}/api/kick/chat/${channel}`);
+        es = new EventSource(
+          `${base}/api/kick/chat/${encodeURIComponent(channel)}`,
+        );
 
         es.onmessage = (e) => {
           try {
@@ -76,6 +90,9 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
               es?.close();
               setStatus("error");
               setErrorMsg(data.message || "Erro ao conectar ao chat");
+              if (data.retryable === true) {
+                scheduleReconnect(15_000);
+              }
             } else if (data.type === "disconnected") {
               es?.close();
               scheduleReconnect(3000);
@@ -100,6 +117,10 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
     return () => {
       active = false;
       if (retryTimer) clearTimeout(retryTimer);
+      if (scrollTimerRef.current) {
+        clearTimeout(scrollTimerRef.current);
+        scrollTimerRef.current = null;
+      }
       es?.close();
     };
   }, [channel, addMessage]);

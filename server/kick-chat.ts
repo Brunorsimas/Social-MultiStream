@@ -205,7 +205,13 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
       Connection: "keep-alive",
       "X-Accel-Buffering": "no",
     });
-    res.write(`data: ${JSON.stringify({ type: "error", message })}\n\n`);
+    res.write(
+      `data: ${JSON.stringify({
+        type: "error",
+        message,
+        retryable: chatroom.reason !== "not_found",
+      })}\n\n`,
+    );
     res.end();
     return;
   }
@@ -247,7 +253,11 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : String(error);
     console.error(`[kick] WebSocket init failed: ${message}`);
-    send({ type: "error", message: "Falha ao conectar ao WebSocket" });
+    send({
+      type: "error",
+      message: "Falha ao conectar ao WebSocket",
+      retryable: true,
+    });
     res.end();
     return;
   }
@@ -307,7 +317,11 @@ export async function kickChatSSE(req: Request, res: Response): Promise<void> {
 
   ws.on("error", (e) => {
     console.error(`[kick] WebSocket error: ${e.message}`);
-    send({ type: "error", message: "Erro no WebSocket do Kick" });
+    send({
+      type: "error",
+      message: "Erro no WebSocket do Kick",
+      retryable: true,
+    });
   });
 
   ws.on("close", (code) => {

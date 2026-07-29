@@ -23,7 +23,9 @@ import {
 const require = createRequire(import.meta.url);
 const {
   extractAssetsFromBundles,
+  formatHttpError,
   PUBLIC_ORIGIN_PLACEHOLDER: BUILD_ORIGIN_PLACEHOLDER,
+  rewriteBundleLocalUrls,
 } = require("../scripts/build.js");
 
 test("usa somente um domínio público no deployment", () => {
@@ -69,6 +71,33 @@ test("publica somente a porta do servidor Express", () => {
   assert.match(
     replitConfig,
     /\[\[ports\]\]\s+localPort\s*=\s*5000\s+externalPort\s*=\s*80/,
+  );
+});
+
+test("mantém o patch HTTPS alinhado à versão instalada do expo-asset", () => {
+  const packageLock = JSON.parse(
+    readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
+  );
+  const expoAssetVersion =
+    packageLock.packages["node_modules/expo-asset"]?.version;
+
+  assert.ok(expoAssetVersion, "expo-asset ausente do package-lock.json");
+
+  const patch = readFileSync(
+    new URL(
+      `../patches/expo-asset+${expoAssetVersion}.patch`,
+      import.meta.url,
+    ),
+    "utf8",
+  );
+
+  assert.match(
+    patch,
+    /\+\s+const scheme = manifestBaseUrl\?\.startsWith\('https:\/\/'\)/,
+  );
+  assert.match(
+    patch,
+    /\+\s+\? scheme \+ manifest2\.extra\.expoGo\.debuggerHost/,
   );
 });
 
@@ -201,6 +230,24 @@ test("injeta a origem pública no bundle estático", () => {
   );
 });
 
+test("remove URLs locais do Metro no bundle estático", () => {
+  const bundle = [
+    "const fallback = 'http://localhost:8081/';",
+    "//# sourceMappingURL=http://localhost:8081/index.map",
+  ].join("\n");
+
+  const rewritten = rewriteBundleLocalUrls(
+    bundle,
+    BUILD_ORIGIN_PLACEHOLDER,
+  );
+
+  assert.equal(rewritten.includes("localhost:8081"), false);
+  assert.equal(
+    rewritten.match(/https:\/\/expo-public-origin\.invalid/g)?.length,
+    2,
+  );
+});
+
 test("preserva todas as variantes de escala dos assets Metro", () => {
   const descriptor =
     'httpServerLocation:"/assets/?unstable_path=.%2Fassets%2Fimages",' +
@@ -238,6 +285,17 @@ test("preserva todas as variantes de escala dos assets Metro", () => {
       "hash-3",
       "hash-4",
     ],
+  );
+});
+
+test("preserva o diagnóstico retornado pelo Metro em falhas HTTP", async () => {
+  const message = await formatHttpError(
+    new Response("Unable to resolve module example", { status: 500 }),
+  );
+
+  assert.equal(
+    message,
+    "HTTP 500: Unable to resolve module example",
   );
 });
 

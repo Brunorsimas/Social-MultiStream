@@ -61,7 +61,7 @@
     "react-native-webview": "13.15.0",
     "react-native-worklets": "0.5.1",
     "brace-expansion": "file:packages/brace-expansion-safe",
-    "tsx": "^4.20.6",
+    "tsx": "4.21.0",
     "ws": "^8.18.0",
     "zod": "^3.24.2",
     "zod-validation-error": "^3.4.0"
@@ -73,6 +73,7 @@
     "@types/react": "~19.1.10",
     "babel-plugin-react-compiler": "^19.0.0-beta-e993439-20250117",
     "drizzle-kit": "^0.31.4",
+    "esbuild": "~0.25.12",
     "eslint": "^9.31.0",
     "eslint-config-expo": "~10.0.0",
     "patch-package": "^8.0.0",
@@ -81,8 +82,13 @@
   "private": true,
   "overrides": {
     "brace-expansion": "$brace-expansion",
+    "@esbuild-kit/core-utils": {
+      "esbuild": "$esbuild"
+    },
+    "tsx@4.21.0": {
+      "esbuild": "0.27.2"
+    },
     "body-parser": "^2.3.0",
-    "esbuild": "^0.25.0",
     "uuid": "^11.0.0",
     "postcss": "^8.5.23",
     "tar": "^7.5.22"

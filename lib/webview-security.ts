@@ -11,7 +11,7 @@ const PLATFORM_DOMAINS: Record<string, string[]> = {
   twitch: ["twitch.tv"],
   youtube: ["youtube.com", "youtu.be", "google.com"],
   kick: ["kick.com"],
-  facebook: ["facebook.com", "fb.com"],
+  facebook: ["facebook.com", "fb.com", "fb.watch"],
   tiktok: ["tiktok.com"],
 };
 
@@ -19,7 +19,7 @@ const COLLECTOR_DOMAINS: Record<string, string[]> = {
   twitch: ["twitch.tv"],
   youtube: ["youtube.com", "youtu.be"],
   kick: ["kick.com"],
-  facebook: ["facebook.com", "fb.com"],
+  facebook: ["facebook.com", "fb.com", "fb.watch"],
   tiktok: ["tiktok.com"],
 };
 
