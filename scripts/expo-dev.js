@@ -58,7 +58,7 @@ function startExpoDev() {
   let terminationSignal = null;
   const child = spawn(
     process.execPath,
-    [expoCli, "start", "--localhost"],
+    [expoCli, "start"],
     {
       env: createExpoDevEnvironment(),
       stdio: "inherit",

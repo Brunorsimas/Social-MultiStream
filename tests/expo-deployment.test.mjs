@@ -93,6 +93,11 @@ test("não bloqueia o preview reinstalando dependências ou validando a rede", (
     /name\s*=\s*"Project"\s+mode\s*=\s*"parallel"[\s\S]*?task\s*=\s*"workflow\.run"\s+args\s*=\s*"Start App"/,
   );
   assert.equal(packageJson.scripts["expo:dev"], "node scripts/expo-dev.js");
+  const expoDevScript = readFileSync(
+    new URL("../scripts/expo-dev.js", import.meta.url),
+    "utf8",
+  );
+  assert.doesNotMatch(expoDevScript, /\[expoCli,\s*"start",\s*"--localhost"\]/);
 });
 
 test("usa o dominio dedicado do Metro no preview Replit", () => {
@@ -308,6 +313,7 @@ test("executa o Metro de build sem depender da rede externa", () => {
   );
 
   assert.match(buildScript, /EXPO_OFFLINE:\s*"1"/);
+  assert.match(buildScript, /const downloadTimeout = 600000;/);
 });
 
 test("preserva todas as variantes de escala dos assets Metro", () => {
