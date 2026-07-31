@@ -1,4 +1,4 @@
-export const STARTUP_FONT_TIMEOUT_MS = 8_000;
+export const STARTUP_FONT_TIMEOUT_MS = 2_000;
 
 export function isAppStartupReady(
   fontsLoaded: boolean,

@@ -88,6 +88,7 @@ test("não bloqueia o preview reinstalando dependências ou validando a rede", (
   );
 
   assert.doesNotMatch(replitConfig, /\bnpm\s+(?:ci|install)\b/);
+  assert.doesNotMatch(replitConfig, /ensurePreviewReachable/);
   assert.match(
     replitConfig,
     /name\s*=\s*"Project"\s+mode\s*=\s*"parallel"[\s\S]*?task\s*=\s*"workflow\.run"\s+args\s*=\s*"Start App"/,
