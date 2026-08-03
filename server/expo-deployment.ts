@@ -64,6 +64,28 @@ export function resolveExpoPublicOrigin(
   );
 }
 
+export type MetroProxyHeaders = {
+  host: string;
+  forwardedHost: string;
+  forwardedProto: "http" | "https";
+};
+
+export function resolveMetroProxyHeaders(
+  environment: Environment,
+  requestHost?: string | null,
+  requestProtocol?: string | null,
+): MetroProxyHeaders {
+  const publicOrigin =
+    resolveExpoPublicOrigin(environment, requestHost, requestProtocol) ??
+    resolvePublicOrigin(null, requestHost, requestProtocol);
+
+  return {
+    host: publicOrigin.host,
+    forwardedHost: publicOrigin.host,
+    forwardedProto: publicOrigin.protocol,
+  };
+}
+
 function rebaseUrl(value: unknown, origin: string): string {
   if (typeof value !== "string") {
     throw new Error("Expo manifest contains a non-string asset URL");

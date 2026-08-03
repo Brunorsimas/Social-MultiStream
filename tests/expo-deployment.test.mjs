@@ -16,6 +16,7 @@ import {
   injectExpoPublicOrigin,
   prepareExpoManifest,
   resolveExpoPublicOrigin,
+  resolveMetroProxyHeaders,
   selectExpoPublicDomain,
   validateExpoBuild,
 } from "../server/expo-deployment.ts";
@@ -131,6 +132,30 @@ test("impede URLs malformadas no manifesto de desenvolvimento", () => {
   assert.equal("EXPO_PACKAGER_PROXY_URL" in localEnvironment, false);
   assert.equal("REACT_NATIVE_PACKAGER_HOSTNAME" in localEnvironment, false);
   assert.equal("EXPO_PUBLIC_DOMAIN" in localEnvironment, false);
+});
+
+test("normaliza headers duplicados antes de encaminhar ao Metro", () => {
+  assert.deepEqual(
+    resolveMetroProxyHeaders(
+      { REPLIT_DEV_DOMAIN: "workspace.replit.dev" },
+      "workspace.replit.dev, workspace.replit.dev",
+      "https, http",
+    ),
+    {
+      host: "workspace.replit.dev",
+      forwardedHost: "workspace.replit.dev",
+      forwardedProto: "https",
+    },
+  );
+
+  assert.deepEqual(
+    resolveMetroProxyHeaders({}, "127.0.0.1:5000", "http"),
+    {
+      host: "127.0.0.1:5000",
+      forwardedHost: "127.0.0.1:5000",
+      forwardedProto: "http",
+    },
+  );
 });
 
 test("mantém o patch HTTPS alinhado à versão instalada do expo-asset", () => {

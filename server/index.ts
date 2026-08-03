@@ -11,6 +11,7 @@ import {
   injectExpoPublicOrigin,
   prepareExpoManifest,
   resolveExpoPublicOrigin,
+  resolveMetroProxyHeaders,
   selectExpoPublicDomain,
   validateExpoBuild,
 } from "./expo-deployment";
@@ -375,11 +376,32 @@ function configureDevelopmentMetroProxy(app: express.Application) {
     target: `http://127.0.0.1:${metroPort}`,
     ws: true,
     changeOrigin: false,
-    // xfwd must be false: Replit's infrastructure already sets X-Forwarded-Host.
-    // Setting xfwd:true would append a second value ("host1, host2") which makes
-    // Metro's `new URL(req.url, "https://host1, host2")` throw TypeError: Invalid URL.
-    // That 500 causes Expo Go to abort asset loading → "Your app is starting" loop.
+    // Do not ask the proxy library to create another forwarded-header layer.
+    // The hooks below also replace any comma-separated values already supplied
+    // by upstream Replit proxies before Metro attempts to construct a URL.
     xfwd: false,
+    on: {
+      proxyReq: (proxyReq, req) => {
+        const headers = resolveMetroProxyHeaders(
+          process.env,
+          req.headers.host,
+          (req.socket as { encrypted?: boolean }).encrypted ? "https" : "http",
+        );
+        proxyReq.setHeader("host", headers.host);
+        proxyReq.setHeader("x-forwarded-host", headers.forwardedHost);
+        proxyReq.setHeader("x-forwarded-proto", headers.forwardedProto);
+      },
+      proxyReqWs: (proxyReq, req) => {
+        const headers = resolveMetroProxyHeaders(
+          process.env,
+          req.headers.host,
+          (req.socket as { encrypted?: boolean }).encrypted ? "https" : "http",
+        );
+        proxyReq.setHeader("host", headers.host);
+        proxyReq.setHeader("x-forwarded-host", headers.forwardedHost);
+        proxyReq.setHeader("x-forwarded-proto", headers.forwardedProto);
+      },
+    },
     // At "/" we only proxy if the request is from Expo Go (has expo-platform header).
     // Browser requests to "/" skip the proxy so the landing page with QR code is shown.
     // "/api" and "/healthz" are always handled by the Express app itself.
