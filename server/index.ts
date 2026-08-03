@@ -375,7 +375,11 @@ function configureDevelopmentMetroProxy(app: express.Application) {
     target: `http://127.0.0.1:${metroPort}`,
     ws: true,
     changeOrigin: false,
-    xfwd: true,
+    // xfwd must be false: Replit's infrastructure already sets X-Forwarded-Host.
+    // Setting xfwd:true would append a second value ("host1, host2") which makes
+    // Metro's `new URL(req.url, "https://host1, host2")` throw TypeError: Invalid URL.
+    // That 500 causes Expo Go to abort asset loading → "Your app is starting" loop.
+    xfwd: false,
     // At "/" we only proxy if the request is from Expo Go (has expo-platform header).
     // Browser requests to "/" skip the proxy so the landing page with QR code is shown.
     // "/api" and "/healthz" are always handled by the Express app itself.
