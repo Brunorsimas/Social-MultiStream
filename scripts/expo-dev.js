@@ -53,8 +53,12 @@ function createExpoDevEnvironment(environment = process.env) {
   return result;
 }
 
+function resolveExpoCli(projectRoot = path.resolve(__dirname, "..")) {
+  return require.resolve("@expo/cli", { paths: [projectRoot] });
+}
+
 function startExpoDev() {
-  const expoCli = path.resolve(__dirname, "../node_modules/expo/bin/cli");
+  const expoCli = resolveExpoCli();
   let terminationSignal = null;
   const child = spawn(
     process.execPath,
@@ -89,4 +93,5 @@ if (require.main === module) {
 module.exports = {
   createExpoDevEnvironment,
   normalizeHost,
+  resolveExpoCli,
 };

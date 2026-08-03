@@ -31,6 +31,7 @@ const {
 const {
   createExpoDevEnvironment,
   normalizeHost,
+  resolveExpoCli,
 } = require("../scripts/expo-dev.js");
 
 test("usa somente um domínio público no deployment", () => {
@@ -118,6 +119,42 @@ test("usa o dominio dedicado do Metro no preview Replit", () => {
     "api-workspace.replit.dev",
   );
   assert.equal(environment.EXPO_PUBLIC_DOMAIN, "api-workspace.replit.dev");
+});
+
+test("executa a CLI local fixada no projeto", () => {
+  const packageJson = JSON.parse(
+    readFileSync(new URL("../package.json", import.meta.url), "utf8"),
+  );
+  const packageLock = JSON.parse(
+    readFileSync(new URL("../package-lock.json", import.meta.url), "utf8"),
+  );
+  const cliPath = resolveExpoCli();
+
+  assert.equal(packageJson.devDependencies["@expo/cli"], "54.0.26");
+  assert.equal(
+    packageLock.packages[""].devDependencies["@expo/cli"],
+    "54.0.26",
+  );
+  assert.match(
+    cliPath,
+    /node_modules[\\/]@expo[\\/]cli[\\/]build[\\/]bin[\\/]cli$/,
+  );
+  assert.doesNotMatch(cliPath, /node_modules[\\/]expo[\\/]bin[\\/]cli$/);
+});
+
+test("recria dependencias somente pelo lockfile portavel", () => {
+  const packageLock = readFileSync(
+    new URL("../package-lock.json", import.meta.url),
+    "utf8",
+  );
+  const postMergeScript = readFileSync(
+    new URL("../scripts/post-merge.sh", import.meta.url),
+    "utf8",
+  );
+
+  assert.doesNotMatch(packageLock, /package-firewall\.replit\.local/);
+  assert.match(postMergeScript, /npm ci --legacy-peer-deps/);
+  assert.doesNotMatch(postMergeScript, /^\s*npm install/m);
 });
 
 test("impede URLs malformadas no manifesto de desenvolvimento", () => {

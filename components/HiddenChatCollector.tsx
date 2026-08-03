@@ -158,8 +158,7 @@ function useWebChatSSE(
           }
         };
       } catch {
-        onStatusChange?.(chat.id, "error", "Unable to open connection");
-        scheduleReconnect(5000);
+        onStatusChange?.(chat.id, "error", "API server is not configured");
       }
     }
 

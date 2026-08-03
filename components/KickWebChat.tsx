@@ -108,7 +108,8 @@ export default function KickWebChat({ channel, fontSize = 14 }: KickWebChatProps
           }
         };
       } catch {
-        scheduleReconnect(5000);
+        setStatus("error");
+        setErrorMsg("Servidor da API não configurado");
       }
     }
 

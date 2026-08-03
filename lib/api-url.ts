@@ -67,5 +67,7 @@ export function getApiUrl(): string {
     if (locationUrl) return locationUrl;
   }
 
-  return "http://localhost:5000/";
+  throw new Error(
+    "API origin unavailable: configure EXPO_PUBLIC_DOMAIN with the public server domain",
+  );
 }

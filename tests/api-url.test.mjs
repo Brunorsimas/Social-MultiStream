@@ -34,7 +34,7 @@ test("normaliza a origem configurada da API", () => {
   });
 });
 
-test("ignora configuração inválida sem interromper o aplicativo", () => {
+test("rejeita configuração inválida sem redirecionar para localhost", () => {
   for (const invalidDomain of [
     "https://",
     "https,...",
@@ -48,7 +48,10 @@ test("ignora configuração inválida sem interromper o aplicativo", () => {
     "-invalid.example.test",
   ]) {
     withPublicDomain(invalidDomain, () => {
-      assert.equal(getApiUrl(), "http://localhost:5000/");
+      assert.throws(
+        () => getApiUrl(),
+        /API origin unavailable/,
+      );
     });
   }
 });
