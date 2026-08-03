@@ -1613,11 +1613,41 @@ function configureDevelopmentMetroProxy(app2) {
     target: `http://127.0.0.1:${metroPort}`,
     ws: true,
     changeOrigin: false,
-    xfwd: true,
-    pathFilter: (pathname) => !pathname.startsWith("/api") && pathname !== "/healthz"
+    // xfwd must be false: Replit's infrastructure already sets X-Forwarded-Host.
+    // Setting xfwd:true would append a second value ("host1, host2") which makes
+    // Metro's `new URL(req.url, "https://host1, host2")` throw TypeError: Invalid URL.
+    // That 500 causes Expo Go to abort asset loading → "Your app is starting" loop.
+    xfwd: false,
+    // At "/" we only proxy if the request is from Expo Go (has expo-platform header).
+    // Browser requests to "/" skip the proxy so the landing page with QR code is shown.
+    // "/api" and "/healthz" are always handled by the Express app itself.
+    pathFilter: (pathname, req) => {
+      if (!pathname.startsWith("/api") && pathname !== "/healthz") {
+        if (pathname === "/") {
+          const platform = req.headers?.["expo-platform"];
+          return platform === "ios" || platform === "android";
+        }
+        return true;
+      }
+      return false;
+    }
   });
   app2.use(metroProxy);
   return metroProxy;
+}
+function configureDevelopmentLandingPage(app2) {
+  const templatePath = path2.resolve(
+    process.cwd(),
+    "server",
+    "templates",
+    "landing-page.html"
+  );
+  if (!fs2.existsSync(templatePath)) return;
+  const landingPageTemplate = fs2.readFileSync(templatePath, "utf-8");
+  const appName = getAppName();
+  app2.get("/", (req, res) => {
+    serveLandingPage({ req, res, landingPageTemplate, appName });
+  });
 }
 function setupErrorHandler(app2) {
   app2.use((err, req, res, next) => {
@@ -1651,6 +1681,8 @@ async function startServer() {
   const metroProxy = process.env.NODE_ENV === "production" ? null : configureDevelopmentMetroProxy(app);
   if (process.env.NODE_ENV === "production") {
     configureExpoAndLanding(app);
+  } else {
+    configureDevelopmentLandingPage(app);
   }
   const server = await registerRoutes(app);
   if (metroProxy) {
