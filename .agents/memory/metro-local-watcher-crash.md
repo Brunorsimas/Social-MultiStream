@@ -1,15 +1,21 @@
 ---
-name: Metro FallbackWatcher crash on .local directory
-description: Why Metro crashes with ENOENT on Replit and how the fix works.
+name: Metro FallbackWatcher crash and dev landing page
+description: Why Metro crashes with ENOENT on Replit, how to fix it, and how the dev landing page works.
 ---
 
-## The rule
-`metro.config.js` must exclude `.local` from Metro's file map using a correctly escaped regex. The original code used `path.join(__dirname, "\\.local")` which produces `/workspace/\.local` (literal backslash on Linux) — a path that never exists, so the blockList regex never matched the real `/workspace/.local` directory.
+## Metro ENOENT crash
 
-**Why:** Replit creates and deletes volatile files in `.local/state/workflow-logs/` at runtime. Metro's FallbackWatcher calls `fs.watch()` on every directory it finds during startup scan. When those log files are deleted after Metro scans but before it can watch them, `fs.watch()` throws ENOENT and crashes Metro. The user experiences this as the app "stuck in a loop" — Metro keeps crashing whenever Expo Go tries to connect.
+The `metro.config.js` blockList regex must use correct escaping. The original code used `path.join(__dirname, "\\.local")` which on Linux produces `/workspace/\.local` (literal backslash) — a path that never exists, so `.local` was never excluded. Metro's FallbackWatcher called `fs.watch()` on volatile Replit log files in `.local/state/workflow-logs/`. When those files were deleted at runtime, `fs.watch()` threw ENOENT and crashed Metro. The user experiences this as an app "stuck in a loop" — Metro crashes whenever Expo Go tries to connect.
 
-**How to apply:** Use `localDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")` to properly escape the absolute path before using it in `new RegExp(...)`. The pattern should be `^<escaped-path>(\\/.*)?$` to match the directory and all its children.
+**Fix:** Use `localDir.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")` to properly escape the absolute path, then `^<escaped-path>(\\/.*)?$` as the pattern.
 
-## Also fixed alongside this
-- `lib/startup.ts`: `STARTUP_FONT_TIMEOUT_MS` reduced from 8000 → 2000ms so the app appears in max 2s even when fonts fail to load from Metro (common when the proxy has issues).
-- `.replit` Start Frontend workflow: removed `ensurePreviewReachable = "/status"` — Metro's bundler server doesn't serve that route, causing the Replit health check to always fail and report the workflow as dead even when Metro was running fine.
+## Development landing page (QR code visibility)
+
+In development, the backend (port 5000) acts as a full Metro proxy, including `GET /`. This means the browser sees Metro's raw debug UI, not the styled landing page with QR code (that page is production-only). The fix adds a `configureDevelopmentLandingPage` route for `GET /` in development.
+
+**Critical:** The proxy's `pathFilter` must forward `GET /` requests that carry the `expo-platform` header (Expo Go manifest requests) to Metro, but skip the proxy for plain browser requests (no header) so the landing page is served. If both are served the landing page, Expo Go can't get its manifest.
+
+## Also fixed
+
+- `lib/startup.ts`: `STARTUP_FONT_TIMEOUT_MS` reduced 8000 → 2000ms (font proxy issues cause 8s blank screen).
+- `.replit` Start Frontend workflow: removed `ensurePreviewReachable = "/status"` — Metro doesn't serve that route; the Replit health check always failed even when Metro was running fine. Fixed by calling `configureWorkflow` (outputType console, waitForPort 8081).

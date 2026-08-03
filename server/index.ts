@@ -376,12 +376,40 @@ function configureDevelopmentMetroProxy(app: express.Application) {
     ws: true,
     changeOrigin: false,
     xfwd: true,
-    pathFilter: (pathname) =>
-      !pathname.startsWith("/api") && pathname !== "/healthz",
+    // At "/" we only proxy if the request is from Expo Go (has expo-platform header).
+    // Browser requests to "/" skip the proxy so the landing page with QR code is shown.
+    // "/api" and "/healthz" are always handled by the Express app itself.
+    pathFilter: (pathname, req) => {
+      if (!pathname.startsWith("/api") && pathname !== "/healthz") {
+        if (pathname === "/") {
+          const platform = (req as { headers?: Record<string, string | string[] | undefined> }).headers?.["expo-platform"];
+          return platform === "ios" || platform === "android";
+        }
+        return true;
+      }
+      return false;
+    },
   });
 
   app.use(metroProxy);
   return metroProxy;
+}
+
+function configureDevelopmentLandingPage(app: express.Application) {
+  const templatePath = path.resolve(
+    process.cwd(),
+    "server",
+    "templates",
+    "landing-page.html",
+  );
+  if (!fs.existsSync(templatePath)) return;
+
+  const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
+  const appName = getAppName();
+
+  app.get("/", (req: Request, res: Response) => {
+    serveLandingPage({ req, res, landingPageTemplate, appName });
+  });
 }
 
 function setupErrorHandler(app: express.Application) {
@@ -442,6 +470,10 @@ async function startServer() {
 
   if (process.env.NODE_ENV === "production") {
     configureExpoAndLanding(app);
+  } else {
+    // Serve the landing page with QR code at "/" in dev mode.
+    // The Metro proxy above skips "/" so this handler is reached.
+    configureDevelopmentLandingPage(app);
   }
 
   const server = await registerRoutes(app);
