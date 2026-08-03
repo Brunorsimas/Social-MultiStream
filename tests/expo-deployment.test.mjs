@@ -96,6 +96,7 @@ test("não bloqueia o preview reinstalando dependências ou validando a rede", (
     /name\s*=\s*"Project"\s+mode\s*=\s*"parallel"[\s\S]*?task\s*=\s*"workflow\.run"\s+args\s*=\s*"Start App"/,
   );
   assert.equal(packageJson.scripts["expo:dev"], "node scripts/expo-dev.js");
+  assert.equal(packageJson.scripts.start, "npm run expo:dev");
   const expoDevScript = readFileSync(
     new URL("../scripts/expo-dev.js", import.meta.url),
     "utf8",
@@ -109,7 +110,8 @@ test("usa o dominio dedicado do Metro no preview Replit", () => {
     REPLIT_EXPO_DEV_DOMAIN: "expo-workspace.replit.dev",
   });
 
-  assert.equal(environment.EXPO_OFFLINE, "1");
+  assert.equal("EXPO_OFFLINE" in environment, false);
+  assert.equal(environment.EXPO_NO_DEPENDENCY_VALIDATION, "1");
   assert.equal(
     environment.EXPO_PACKAGER_PROXY_URL,
     "https://expo-workspace.replit.dev",
@@ -143,6 +145,10 @@ test("executa a CLI local fixada no projeto", () => {
 });
 
 test("recria dependencias somente pelo lockfile portavel", () => {
+  const replitConfig = readFileSync(
+    new URL("../.replit", import.meta.url),
+    "utf8",
+  );
   const packageLock = readFileSync(
     new URL("../package-lock.json", import.meta.url),
     "utf8",
@@ -155,6 +161,7 @@ test("recria dependencias somente pelo lockfile portavel", () => {
   assert.doesNotMatch(packageLock, /package-firewall\.replit\.local/);
   assert.match(postMergeScript, /npm ci --legacy-peer-deps/);
   assert.doesNotMatch(postMergeScript, /^\s*npm install/m);
+  assert.match(replitConfig, /\[postMerge\][\s\S]*timeoutMs\s*=\s*900000/);
 });
 
 test("impede URLs malformadas no manifesto de desenvolvimento", () => {
@@ -166,9 +173,22 @@ test("impede URLs malformadas no manifesto de desenvolvimento", () => {
   assert.equal(normalizeHost("one.replit.dev,two.replit.dev"), null);
 
   const localEnvironment = createExpoDevEnvironment({});
+  assert.equal("EXPO_OFFLINE" in localEnvironment, false);
+  assert.equal(localEnvironment.EXPO_NO_DEPENDENCY_VALIDATION, "1");
   assert.equal("EXPO_PACKAGER_PROXY_URL" in localEnvironment, false);
   assert.equal("REACT_NATIVE_PACKAGER_HOSTNAME" in localEnvironment, false);
   assert.equal("EXPO_PUBLIC_DOMAIN" in localEnvironment, false);
+
+  const configuredEnvironment = createExpoDevEnvironment({
+    EXPO_OFFLINE: "1",
+    EXPO_PUBLIC_DOMAIN: "https://api.example.test",
+  });
+  assert.equal("EXPO_OFFLINE" in configuredEnvironment, false);
+  assert.equal(configuredEnvironment.EXPO_NO_DEPENDENCY_VALIDATION, "1");
+  assert.equal(
+    configuredEnvironment.EXPO_PUBLIC_DOMAIN,
+    "api.example.test",
+  );
 });
 
 test("normaliza headers duplicados antes de encaminhar ao Metro", () => {
@@ -376,6 +396,8 @@ test("executa o Metro de build sem depender da rede externa", () => {
   );
 
   assert.match(buildScript, /EXPO_OFFLINE:\s*"1"/);
+  assert.match(buildScript, /require\.resolve\("@expo\/cli"/);
+  assert.doesNotMatch(buildScript, /require\.resolve\("expo\/bin\/cli"\)/);
   assert.match(buildScript, /const downloadTimeout = 600000;/);
 });
 

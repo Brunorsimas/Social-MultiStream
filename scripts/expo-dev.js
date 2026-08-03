@@ -29,25 +29,28 @@ function normalizeHost(value) {
 }
 
 function createExpoDevEnvironment(environment = process.env) {
-  const apiHost = normalizeHost(environment.REPLIT_DEV_DOMAIN);
+  const replitApiHost = normalizeHost(environment.REPLIT_DEV_DOMAIN);
+  const configuredApiHost = normalizeHost(environment.EXPO_PUBLIC_DOMAIN);
+  const apiHost = replitApiHost || configuredApiHost;
   const expoHost =
-    normalizeHost(environment.REPLIT_EXPO_DEV_DOMAIN) || apiHost;
-  const result = {
-    ...environment,
-    EXPO_OFFLINE: "1",
-  };
+    normalizeHost(environment.REPLIT_EXPO_DEV_DOMAIN) || replitApiHost;
+  const result = { ...environment };
+
+  delete result.EXPO_OFFLINE;
+  result.EXPO_NO_DEPENDENCY_VALIDATION = "1";
 
   if (apiHost) {
     result.EXPO_PUBLIC_DOMAIN = apiHost;
-    result.REACT_NATIVE_PACKAGER_HOSTNAME = apiHost;
+  } else {
+    delete result.EXPO_PUBLIC_DOMAIN;
+  }
+
+  if (replitApiHost) {
+    result.REACT_NATIVE_PACKAGER_HOSTNAME = replitApiHost;
   }
 
   if (expoHost) {
     result.EXPO_PACKAGER_PROXY_URL = `https://${expoHost}`;
-  } else {
-    delete result.EXPO_PACKAGER_PROXY_URL;
-    delete result.REACT_NATIVE_PACKAGER_HOSTNAME;
-    delete result.EXPO_PUBLIC_DOMAIN;
   }
 
   return result;

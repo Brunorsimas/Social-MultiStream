@@ -66,4 +66,4 @@ waitForPort = 8081
 
 [postMerge]
 path = "scripts/post-merge.sh"
-timeoutMs = 300000
+timeoutMs = 900000

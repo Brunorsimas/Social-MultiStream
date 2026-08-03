@@ -107,7 +107,9 @@ async function startMetro(expoPublicDomain) {
     EXPO_OFFLINE: "1",
     EXPO_PUBLIC_DOMAIN: expoPublicDomain,
   };
-  const expoCliPath = require.resolve("expo/bin/cli");
+  const expoCliPath = require.resolve("@expo/cli", {
+    paths: [path.resolve(__dirname, "..")],
+  });
   metroProcess = spawn(
     process.execPath,
     [
