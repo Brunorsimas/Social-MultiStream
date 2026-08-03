@@ -1,0 +1,1 @@
+- [Metro FallbackWatcher crash on .local](metro-local-watcher-crash.md) — Metro crashes ENOENT on Replit because `.local/state/workflow-logs/` files are volatile; fix requires correct regex escaping in blockList.
