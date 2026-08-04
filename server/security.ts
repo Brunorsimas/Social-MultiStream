@@ -30,7 +30,7 @@ export function buildContentSecurityPolicy(nonce: string): string {
     "connect-src 'self'",
     "base-uri 'none'",
     "form-action 'none'",
-    "frame-ancestors 'none'",
+    "frame-ancestors 'self' https://replit.com https://*.replit.com https://*.replit.dev",
     "object-src 'none'",
   ].join("; ");
 }

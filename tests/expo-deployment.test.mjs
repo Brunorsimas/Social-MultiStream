@@ -37,8 +37,10 @@ const {
   rewriteBundleLocalUrls,
 } = require("../scripts/build.js");
 const {
+  createTerminalQrCode,
   createExpoDevEnvironment,
   normalizeHost,
+  resolveExpoPreviewUrl,
   resolveExpoCli,
 } = require("../scripts/expo-dev.js");
 
@@ -138,6 +140,21 @@ test("usa o dominio dedicado do Metro no preview Replit", () => {
     "api-workspace.replit.dev",
   );
   assert.equal(environment.EXPO_PUBLIC_DOMAIN, "api-workspace.replit.dev");
+  assert.equal(
+    resolveExpoPreviewUrl({
+      REPLIT_DEV_DOMAIN: "api-workspace.replit.dev",
+    }),
+    "exps://api-workspace.replit.dev",
+  );
+});
+
+test("gera QR no console mesmo quando o workflow nao possui TTY", async () => {
+  const qrCode = await createTerminalQrCode(
+    "exps://api-workspace.replit.dev",
+  );
+
+  assert.ok(qrCode.length > 100);
+  assert.match(qrCode, /\u001b\[/);
 });
 
 test("executa a CLI local fixada no projeto", () => {

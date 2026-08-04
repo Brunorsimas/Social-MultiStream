@@ -1,5 +1,6 @@
 const path = require("node:path");
 const { spawn } = require("node:child_process");
+const QRCode = require("qrcode");
 
 function normalizeHost(value) {
   const input = value?.trim();
@@ -60,9 +61,38 @@ function resolveExpoCli(projectRoot = path.resolve(__dirname, "..")) {
   return require.resolve("@expo/cli", { paths: [projectRoot] });
 }
 
+function resolveExpoPreviewUrl(environment = process.env) {
+  const host =
+    normalizeHost(environment.REPLIT_DEV_DOMAIN) ||
+    normalizeHost(environment.EXPO_PUBLIC_DOMAIN);
+  return host ? `exps://${host}` : null;
+}
+
+function createTerminalQrCode(url) {
+  return QRCode.toString(url, {
+    type: "terminal",
+    small: true,
+    errorCorrectionLevel: "L",
+  });
+}
+
+function printExpoPreviewQrCode(environment = process.env) {
+  const previewUrl = resolveExpoPreviewUrl(environment);
+  if (!previewUrl) return;
+
+  void createTerminalQrCode(previewUrl)
+    .then((qrCode) => {
+      console.log(`\nOpen this project in Expo Go:\n${qrCode}\n${previewUrl}\n`);
+    })
+    .catch((error) => {
+      console.error(`Unable to render Expo QR code: ${error.message}`);
+    });
+}
+
 function startExpoDev() {
   const expoCli = resolveExpoCli();
   let terminationSignal = null;
+  printExpoPreviewQrCode();
   const child = spawn(
     process.execPath,
     [expoCli, "start"],
@@ -94,7 +124,10 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createTerminalQrCode,
   createExpoDevEnvironment,
   normalizeHost,
+  printExpoPreviewQrCode,
+  resolveExpoPreviewUrl,
   resolveExpoCli,
 };

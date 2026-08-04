@@ -10,6 +10,7 @@ import {
   STARTUP_FONT_TIMEOUT_MS,
 } from "../lib/startup.ts";
 import { prepareExpoDevelopmentManifest } from "../server/expo-deployment.ts";
+import { createQrCodeSvg } from "../server/qr-code.ts";
 
 const require = createRequire(import.meta.url);
 
@@ -37,6 +38,14 @@ test("mantem o Expo Router e o desbloqueio da splash ligados ao layout raiz", ()
   assert.match(rootLayout, /STARTUP_FONT_TIMEOUT_MS/);
   assert.match(rootLayout, /SplashScreen\.hideAsync\(\)/);
   assert.match(rootLayout, /<Stack\.Screen name="index"/);
+});
+
+test("gera o QR da landing page sem depender de CDN", async () => {
+  const qrCode = await createQrCodeSvg("exps://workspace.replit.dev");
+
+  assert.match(qrCode, /^<svg/);
+  assert.match(qrCode, /viewBox=/);
+  assert.doesNotMatch(qrCode, /workspace\.replit\.dev/);
 });
 
 test("carrega manifesto, entrada do Expo Router, bundle e assets por HTTP", async () => {

@@ -31,7 +31,7 @@ function buildContentSecurityPolicy(nonce) {
     "connect-src 'self'",
     "base-uri 'none'",
     "form-action 'none'",
-    "frame-ancestors 'none'",
+    "frame-ancestors 'self' https://replit.com https://*.replit.com https://*.replit.dev",
     "object-src 'none'"
   ].join("; ");
 }
@@ -1456,6 +1456,22 @@ import * as fs2 from "fs";
 import * as path2 from "path";
 import { randomBytes } from "node:crypto";
 import { createProxyMiddleware } from "http-proxy-middleware";
+
+// server/qr-code.ts
+import QRCode from "qrcode";
+function createQrCodeSvg(deepLink) {
+  return QRCode.toString(deepLink, {
+    type: "svg",
+    errorCorrectionLevel: "H",
+    margin: 1,
+    color: {
+      dark: "#333333ff",
+      light: "#ffffffff"
+    }
+  });
+}
+
+// server/index.ts
 var app = express();
 var log = console.log;
 var expoBundleCache = /* @__PURE__ */ new Map();
@@ -1702,7 +1718,7 @@ function serveExpoBundle(req, res, next) {
   res.setHeader("content-length", cachedBundle.content.length);
   res.status(200).send(cachedBundle.content);
 }
-function serveLandingPage({
+async function serveLandingPage({
   req,
   res,
   landingPageTemplate,
@@ -1710,13 +1726,14 @@ function serveLandingPage({
 }) {
   const { host, origin: baseUrl } = getRequestPublicOrigin(req);
   const expsUrl = host;
+  const deepLink = `exps://${expsUrl}`;
   const cspNonce = randomBytes(18).toString("base64");
+  const qrCodeSvg = await createQrCodeSvg(deepLink);
   log(`baseUrl`, baseUrl);
   log(`expsUrl`, expsUrl);
-  const html = landingPageTemplate.replace(/BASE_URL_PLACEHOLDER/g, baseUrl).replace(/EXPS_URL_PLACEHOLDER/g, expsUrl).replace(/APP_NAME_PLACEHOLDER/g, escapeHtml(appName)).replace(/CSP_NONCE_PLACEHOLDER/g, cspNonce);
+  const html = landingPageTemplate.replace(/BASE_URL_PLACEHOLDER/g, baseUrl).replace(/EXPS_URL_PLACEHOLDER/g, expsUrl).replace(/QR_CODE_PLACEHOLDER/g, qrCodeSvg).replace(/APP_NAME_PLACEHOLDER/g, escapeHtml(appName)).replace(/CSP_NONCE_PLACEHOLDER/g, cspNonce);
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
-  res.setHeader("X-Frame-Options", "DENY");
   res.setHeader(
     "Content-Security-Policy",
     buildContentSecurityPolicy(cspNonce)
@@ -1747,12 +1764,13 @@ function configureExpoAndLanding(app2) {
       return serveExpoManifest(platform, req, res);
     }
     if (req.path === "/") {
-      return serveLandingPage({
+      void serveLandingPage({
         req,
         res,
         landingPageTemplate,
         appName
-      });
+      }).catch(next);
+      return;
     }
     next();
   });
@@ -1845,8 +1863,10 @@ function configureDevelopmentLandingPage(app2) {
   if (!fs2.existsSync(templatePath)) return;
   const landingPageTemplate = fs2.readFileSync(templatePath, "utf-8");
   const appName = getAppName();
-  app2.get("/", (req, res) => {
-    serveLandingPage({ req, res, landingPageTemplate, appName });
+  app2.get("/", (req, res, next) => {
+    void serveLandingPage({ req, res, landingPageTemplate, appName }).catch(
+      next
+    );
   });
 }
 function setupErrorHandler(app2) {

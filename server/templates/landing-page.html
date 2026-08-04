@@ -181,9 +181,10 @@
         border-radius: 8px;
         padding: 12px;
       }
-      .qr-code canvas {
+      .qr-code svg {
         width: 100%;
         height: 100%;
+        display: block;
       }
       .open-button {
         display: inline-block;
@@ -386,7 +387,7 @@
               <h2 class="step-title">Scan QR Code</h2>
             </div>
             <p class="step-description">Use your phone's camera or Expo Go</p>
-            <div class="qr-code" id="qr-code"></div>
+            <div class="qr-code" id="qr-code">QR_CODE_PLACEHOLDER</div>
             <a href="exps://EXPS_URL_PLACEHOLDER" class="open-button"
               >Open in Expo Go</a
             >
@@ -395,12 +396,6 @@
       </div>
     </div>
 
-    <script
-      nonce="CSP_NONCE_PLACEHOLDER"
-      src="https://unpkg.com/qr-code-styling@1.6.0/lib/qr-code-styling.js"
-      integrity="sha384-K7D1ZVqZVEPBKpQrjKR0/pDcFaWHQPzUBKNY5k8RRX5aGtd4WGHXEnO0qso4YowQ"
-      crossorigin="anonymous"
-    ></script>
     <script nonce="CSP_NONCE_PLACEHOLDER">
       (function () {
         const ua = navigator.userAgent;
@@ -426,30 +421,6 @@
           appStoreBtn.className = "store-link";
           storeButtonsContainer.insertBefore(playStoreBtn, appStoreBtn);
         }
-
-        const qrCode = new QRCodeStyling({
-          width: 400,
-          height: 400,
-          data: deepLink,
-          dotsOptions: {
-            color: "#333333",
-            type: "rounded",
-          },
-          backgroundOptions: {
-            color: "#ffffff",
-          },
-          cornersSquareOptions: {
-            type: "extra-rounded",
-          },
-          cornersDotOptions: {
-            type: "dot",
-          },
-          qrOptions: {
-            errorCorrectionLevel: "H",
-          },
-        });
-
-        qrCode.append(document.getElementById("qr-code"));
 
         if (isAndroid || isIOS) {
           loadingEl.style.display = "block";

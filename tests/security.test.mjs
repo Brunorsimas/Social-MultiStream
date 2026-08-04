@@ -19,8 +19,11 @@ test("escapa HTML dinâmico e gera CSP restrita por nonce", () => {
 
   const policy = buildContentSecurityPolicy("test-nonce");
   assert.match(policy, /script-src 'nonce-test-nonce'/);
-  assert.match(policy, /frame-ancestors 'none'/);
-  assert.doesNotMatch(policy, /https:|unpkg|\*/);
+  assert.match(
+    policy,
+    /frame-ancestors 'self' https:\/\/replit\.com https:\/\/\*\.replit\.com https:\/\/\*\.replit\.dev/,
+  );
+  assert.doesNotMatch(policy, /script-src[^;]*(?:https:|unpkg|\*)/);
 });
 
 test("protege scripts e links externos da página inicial", () => {
@@ -28,15 +31,18 @@ test("protege scripts e links externos da página inicial", () => {
     new URL("../server/templates/landing-page.html", import.meta.url),
     "utf8",
   );
+  const serverIndex = readFileSync(
+    new URL("../server/index.ts", import.meta.url),
+    "utf8",
+  );
 
   assert.equal(
     template.match(/nonce="CSP_NONCE_PLACEHOLDER"/g)?.length,
-    3,
+    2,
   );
-  assert.match(
-    template,
-    /integrity="sha384-K7D1ZVqZVEPBKpQrjKR0\/pDcFaWHQPzUBKNY5k8RRX5aGtd4WGHXEnO0qso4YowQ"/,
-  );
+  assert.match(template, /QR_CODE_PLACEHOLDER/);
+  assert.doesNotMatch(template, /unpkg|QRCodeStyling|<script[^>]+src=/);
+  assert.doesNotMatch(serverIndex, /X-Frame-Options/);
   assert.equal(
     template.match(/rel="noopener noreferrer"/g)?.length,
     2,

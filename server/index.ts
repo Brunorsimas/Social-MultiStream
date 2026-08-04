@@ -19,6 +19,7 @@ import * as fs from "fs";
 import * as path from "path";
 import { randomBytes } from "node:crypto";
 import { createProxyMiddleware } from "http-proxy-middleware";
+import { createQrCodeSvg } from "./qr-code";
 
 const app = express();
 const log = console.log;
@@ -349,7 +350,7 @@ function serveExpoBundle(
   res.status(200).send(cachedBundle.content);
 }
 
-function serveLandingPage({
+async function serveLandingPage({
   req,
   res,
   landingPageTemplate,
@@ -362,7 +363,9 @@ function serveLandingPage({
 }) {
   const { host, origin: baseUrl } = getRequestPublicOrigin(req);
   const expsUrl = host;
+  const deepLink = `exps://${expsUrl}`;
   const cspNonce = randomBytes(18).toString("base64");
+  const qrCodeSvg = await createQrCodeSvg(deepLink);
 
   log(`baseUrl`, baseUrl);
   log(`expsUrl`, expsUrl);
@@ -370,12 +373,12 @@ function serveLandingPage({
   const html = landingPageTemplate
     .replace(/BASE_URL_PLACEHOLDER/g, baseUrl)
     .replace(/EXPS_URL_PLACEHOLDER/g, expsUrl)
+    .replace(/QR_CODE_PLACEHOLDER/g, qrCodeSvg)
     .replace(/APP_NAME_PLACEHOLDER/g, escapeHtml(appName))
     .replace(/CSP_NONCE_PLACEHOLDER/g, cspNonce);
 
   res.setHeader("Content-Type", "text/html; charset=utf-8");
   res.setHeader("Cache-Control", "no-store");
-  res.setHeader("X-Frame-Options", "DENY");
   res.setHeader(
     "Content-Security-Policy",
     buildContentSecurityPolicy(cspNonce),
@@ -421,12 +424,13 @@ function configureExpoAndLanding(app: express.Application) {
     }
 
     if (req.path === "/") {
-      return serveLandingPage({
+      void serveLandingPage({
         req,
         res,
         landingPageTemplate,
         appName,
-      });
+      }).catch(next);
+      return;
     }
 
     next();
@@ -543,8 +547,10 @@ function configureDevelopmentLandingPage(app: express.Application) {
   const landingPageTemplate = fs.readFileSync(templatePath, "utf-8");
   const appName = getAppName();
 
-  app.get("/", (req: Request, res: Response) => {
-    serveLandingPage({ req, res, landingPageTemplate, appName });
+  app.get("/", (req: Request, res: Response, next: NextFunction) => {
+    void serveLandingPage({ req, res, landingPageTemplate, appName }).catch(
+      next,
+    );
   });
 }
 
