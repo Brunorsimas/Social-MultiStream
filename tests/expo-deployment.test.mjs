@@ -6,9 +6,11 @@ import {
   rmSync,
   writeFileSync,
 } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import test from "node:test";
 
 import {
@@ -24,6 +26,10 @@ import {
 } from "../server/expo-deployment.ts";
 
 const require = createRequire(import.meta.url);
+const repositoryRoot = fileURLToPath(new URL("../", import.meta.url));
+const gitSafeDirectory = repositoryRoot
+  .replaceAll("\\", "/")
+  .replace(/\/+$/, "");
 const {
   extractAssetsFromBundles,
   formatHttpError,
@@ -155,7 +161,7 @@ test("executa a CLI local fixada no projeto", () => {
   assert.doesNotMatch(cliPath, /node_modules[\\/]expo[\\/]bin[\\/]cli$/);
 });
 
-test("recria dependencias somente pelo lockfile portavel", () => {
+test("mantem o postMerge portavel e executavel no Linux", () => {
   const replitConfig = readFileSync(
     new URL("../.replit", import.meta.url),
     "utf8",
@@ -168,10 +174,35 @@ test("recria dependencias somente pelo lockfile portavel", () => {
     new URL("../scripts/post-merge.sh", import.meta.url),
     "utf8",
   );
+  const gitAttributes = readFileSync(
+    new URL("../.gitattributes", import.meta.url),
+    "utf8",
+  );
+  const gitMode = spawnSync(
+    "git",
+    [
+      "-c",
+      `safe.directory=${gitSafeDirectory}`,
+      "ls-files",
+      "--stage",
+      "--",
+      "scripts/post-merge.sh",
+    ],
+    {
+      cwd: repositoryRoot,
+      encoding: "utf8",
+    },
+  );
 
   assert.doesNotMatch(packageLock, /package-firewall\.replit\.local/);
+  assert.match(postMergeScript, /^#!\/usr\/bin\/env bash\n/);
+  assert.equal(postMergeScript.includes("\r"), false);
   assert.match(postMergeScript, /npm ci --legacy-peer-deps/);
   assert.doesNotMatch(postMergeScript, /^\s*npm install/m);
+  assert.match(postMergeScript, /require\.resolve\("@expo\/cli"\)/);
+  assert.match(gitAttributes, /^\*\.sh text eol=lf$/m);
+  assert.equal(gitMode.status, 0, gitMode.stderr);
+  assert.match(gitMode.stdout, /^100755\s/);
   assert.match(replitConfig, /\[postMerge\][\s\S]*timeoutMs\s*=\s*900000/);
 });
 
