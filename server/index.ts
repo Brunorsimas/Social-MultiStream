@@ -9,10 +9,10 @@ import {
 } from "./security";
 import {
   injectExpoPublicOrigin,
+  prepareExpoDevelopmentManifest,
   prepareExpoManifest,
-  resolveExpoPublicOrigin,
+  resolveExpoRequestOrigin,
   resolveMetroProxyHeaders,
-  selectExpoPublicDomain,
   validateExpoBuild,
 } from "./expo-deployment";
 import * as fs from "fs";
@@ -151,11 +151,103 @@ function getAppName(): string {
 }
 
 function getRequestPublicOrigin(req: Request) {
-  return resolveExpoPublicOrigin(
+  return resolveExpoRequestOrigin(
     process.env,
     req.get("host"),
     req.protocol,
+    req.get("x-forwarded-host"),
+    req.get("x-forwarded-proto"),
   );
+}
+
+function headerValue(value: string | string[] | undefined): string | undefined {
+  return Array.isArray(value) ? value.join(",") : value;
+}
+
+function getProxyRequestPublicOrigin(req: {
+  headers: Record<string, string | string[] | undefined>;
+  socket: object;
+}) {
+  const encrypted = (req.socket as { encrypted?: boolean }).encrypted;
+  return resolveExpoRequestOrigin(
+    process.env,
+    headerValue(req.headers.host),
+    encrypted ? "https" : "http",
+    headerValue(req.headers["x-forwarded-host"]),
+    headerValue(req.headers["x-forwarded-proto"]),
+  );
+}
+
+function copyExpoResponseHeaders(
+  source: globalThis.Response,
+  destination: Response,
+) {
+  for (const name of [
+    "expo-protocol-version",
+    "expo-sfv-version",
+    "cache-control",
+  ]) {
+    const value = source.headers.get(name);
+    if (value) destination.setHeader(name, value);
+  }
+}
+
+async function serveDevelopmentExpoManifest(
+  metroPort: number,
+  req: Request,
+  res: Response,
+  next: NextFunction,
+): Promise<void> {
+  const platform =
+    req.header("expo-platform") ??
+    (typeof req.query.platform === "string" ? req.query.platform : undefined);
+  const isManifestPath =
+    req.path === "/" || req.path === "/manifest" || req.path === "/index.exp";
+  if (!isManifestPath || (platform !== "ios" && platform !== "android")) {
+    next();
+    return;
+  }
+
+  try {
+    const upstreamHeaders: Record<string, string> = {};
+    for (const name of [
+      "accept",
+      "expo-platform",
+      "expo-protocol-version",
+      "user-agent",
+    ]) {
+      const value = req.header(name);
+      if (value) upstreamHeaders[name] = value;
+    }
+
+    const upstream = await fetch(
+      `http://127.0.0.1:${metroPort}${req.originalUrl}`,
+      {
+        headers: upstreamHeaders,
+        signal: AbortSignal.timeout(120_000),
+      },
+    );
+    const body = await upstream.text();
+    copyExpoResponseHeaders(upstream, res);
+
+    if (!upstream.ok) {
+      res.status(upstream.status).type("text/plain").send(body);
+      return;
+    }
+
+    const manifest = prepareExpoDevelopmentManifest(
+      JSON.parse(body),
+      platform,
+      getRequestPublicOrigin(req),
+    );
+    res
+      .status(200)
+      .type("application/expo+json")
+      .setHeader("cache-control", "no-store");
+    res.send(JSON.stringify(manifest));
+  } catch (error) {
+    next(error);
+  }
 }
 
 function serveExpoManifest(
@@ -268,19 +360,7 @@ function serveLandingPage({
   landingPageTemplate: string;
   appName: string;
 }) {
-  const configuredDomain = selectExpoPublicDomain(process.env);
-  if (
-    process.env.NODE_ENV === "production" &&
-    !normalizePublicHost(configuredDomain)
-  ) {
-    res.status(503).type("text/plain").send("Service unavailable");
-    return;
-  }
-  const { host, origin: baseUrl } = resolvePublicOrigin(
-    configuredDomain,
-    req.get("host"),
-    req.protocol,
-  );
+  const { host, origin: baseUrl } = getRequestPublicOrigin(req);
   const expsUrl = host;
   const cspNonce = randomBytes(18).toString("base64");
 
@@ -382,20 +462,22 @@ function configureDevelopmentMetroProxy(app: express.Application) {
     xfwd: false,
     on: {
       proxyReq: (proxyReq, req) => {
+        const requestOrigin = getProxyRequestPublicOrigin(req);
         const headers = resolveMetroProxyHeaders(
           process.env,
-          req.headers.host,
-          (req.socket as { encrypted?: boolean }).encrypted ? "https" : "http",
+          requestOrigin.host,
+          requestOrigin.protocol,
         );
         proxyReq.setHeader("host", headers.host);
         proxyReq.setHeader("x-forwarded-host", headers.forwardedHost);
         proxyReq.setHeader("x-forwarded-proto", headers.forwardedProto);
       },
       proxyReqWs: (proxyReq, req) => {
+        const requestOrigin = getProxyRequestPublicOrigin(req);
         const headers = resolveMetroProxyHeaders(
           process.env,
-          req.headers.host,
-          (req.socket as { encrypted?: boolean }).encrypted ? "https" : "http",
+          requestOrigin.host,
+          requestOrigin.protocol,
         );
         proxyReq.setHeader("host", headers.host);
         proxyReq.setHeader("x-forwarded-host", headers.forwardedHost);
@@ -417,8 +499,36 @@ function configureDevelopmentMetroProxy(app: express.Application) {
     },
   });
 
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    void serveDevelopmentExpoManifest(metroPort, req, res, next);
+  });
   app.use(metroProxy);
   return metroProxy;
+}
+
+function configureUnavailableExpo(
+  app: express.Application,
+  startupError: unknown,
+) {
+  const diagnostic =
+    startupError instanceof Error ? startupError.message : String(startupError);
+  console.error(`Expo static build unavailable: ${diagnostic}`);
+
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    if (
+      req.path !== "/" &&
+      req.path !== "/manifest" &&
+      req.path !== "/index.exp"
+    ) {
+      next();
+      return;
+    }
+
+    res.status(503).json({
+      error: "Expo build unavailable",
+      retryable: false,
+    });
+  });
 }
 
 function configureDevelopmentLandingPage(app: express.Application) {
@@ -482,10 +592,13 @@ async function startServer() {
   setupBodyParsing(app);
   setupRequestLogging(app);
 
+  let expoStatus =
+    process.env.NODE_ENV === "production" ? "static" : "metro-proxy";
+
   app.get("/healthz", (_req, res) => {
     res.status(200).json({
       status: "ok",
-      expo: process.env.NODE_ENV === "production" ? "static" : "metro-proxy",
+      expo: expoStatus,
     });
   });
 
@@ -495,7 +608,12 @@ async function startServer() {
       : configureDevelopmentMetroProxy(app);
 
   if (process.env.NODE_ENV === "production") {
-    configureExpoAndLanding(app);
+    try {
+      configureExpoAndLanding(app);
+    } catch (error) {
+      expoStatus = "static-unavailable";
+      configureUnavailableExpo(app, error);
+    }
   } else {
     // Serve the landing page with QR code at "/" in dev mode.
     // The Metro proxy above skips "/" so this handler is reached.

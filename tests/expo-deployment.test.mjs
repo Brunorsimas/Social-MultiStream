@@ -14,8 +14,10 @@ import test from "node:test";
 import {
   EXPO_PUBLIC_ORIGIN_PLACEHOLDER,
   injectExpoPublicOrigin,
+  prepareExpoDevelopmentManifest,
   prepareExpoManifest,
   resolveExpoPublicOrigin,
+  resolveExpoRequestOrigin,
   resolveMetroProxyHeaders,
   selectExpoPublicDomain,
   validateExpoBuild,
@@ -101,7 +103,16 @@ test("não bloqueia o preview reinstalando dependências ou validando a rede", (
     new URL("../scripts/expo-dev.js", import.meta.url),
     "utf8",
   );
+  const serverIndex = readFileSync(
+    new URL("../server/index.ts", import.meta.url),
+    "utf8",
+  );
   assert.doesNotMatch(expoDevScript, /\[expoCli,\s*"start",\s*"--localhost"\]/);
+  assert.match(serverIndex, /serveDevelopmentExpoManifest\(metroPort/);
+  assert.match(
+    serverIndex,
+    /catch \(error\) \{\s*expoStatus = "static-unavailable";/,
+  );
 });
 
 test("usa o dominio dedicado do Metro no preview Replit", () => {
@@ -213,6 +224,21 @@ test("normaliza headers duplicados antes de encaminhar ao Metro", () => {
       forwardedProto: "http",
     },
   );
+
+  assert.deepEqual(
+    resolveExpoRequestOrigin(
+      { NODE_ENV: "production" },
+      "internal.invalid:5000",
+      "http",
+      "attacker.invalid, published.replit.app",
+      "http, https",
+    ),
+    {
+      host: "published.replit.app",
+      origin: "https://published.replit.app",
+      protocol: "https",
+    },
+  );
 });
 
 test("mantém o patch HTTPS alinhado à versão instalada do expo-asset", () => {
@@ -263,6 +289,76 @@ test("mantém fallback local apenas no desenvolvimento", () => {
       protocol: "http",
     },
   );
+
+  assert.deepEqual(
+    resolveExpoPublicOrigin(
+      { NODE_ENV: "production" },
+      "published.example.test",
+      "https",
+    ),
+    {
+      host: "published.example.test",
+      origin: "https://published.example.test",
+      protocol: "https",
+    },
+  );
+});
+
+test("reescreve o manifesto de desenvolvimento para o proxy público", () => {
+  const manifest = prepareExpoDevelopmentManifest(
+    {
+      launchAsset: {
+        contentType: "application/javascript",
+        url: "http://127.0.0.1:8081/index.bundle?platform=android&dev=true",
+      },
+      assets: [
+        {
+          url: "http://127.0.0.1:8081/assets/icon.png?platform=android",
+        },
+      ],
+      extra: {
+        expoClient: {
+          hostUri: "127.0.0.1:8081",
+          icon: "./assets/images/icon.png",
+          splash: { image: "./assets/images/splash-icon.png" },
+          _internal: { projectRoot: "C:\\private" },
+        },
+        expoGo: {
+          debuggerHost: "127.0.0.1:8081",
+          developer: { projectRoot: "C:\\private" },
+          packagerOpts: { dev: true },
+        },
+      },
+    },
+    "android",
+    {
+      host: "workspace.replit.dev",
+      origin: "https://workspace.replit.dev",
+      protocol: "https",
+    },
+  );
+
+  assert.equal(
+    manifest.launchAsset.url,
+    "https://workspace.replit.dev/index.bundle?platform=android&dev=true",
+  );
+  assert.equal(
+    manifest.assets[0].url,
+    "https://workspace.replit.dev/assets/icon.png?platform=android",
+  );
+  assert.equal(manifest.extra.expoClient.hostUri, "workspace.replit.dev");
+  assert.equal(
+    manifest.extra.expoClient.iconUrl,
+    "https://workspace.replit.dev/assets/./assets/images/icon.png?platform=android",
+  );
+  assert.equal(
+    manifest.extra.expoClient.splash.imageUrl,
+    "https://workspace.replit.dev/assets/./assets/images/splash-icon.png?platform=android",
+  );
+  assert.equal(manifest.extra.expoGo.debuggerHost, "workspace.replit.dev");
+  assert.equal(manifest.extra.expoGo.packagerOpts.dev, true);
+  assert.equal("_internal" in manifest.extra.expoClient, false);
+  assert.equal("projectRoot" in manifest.extra.expoGo.developer, false);
 });
 
 test("reescreve o manifesto para o host publicado sem caminhos de plataforma", () => {

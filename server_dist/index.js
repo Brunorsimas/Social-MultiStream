@@ -1189,12 +1189,25 @@ function selectExpoPublicDomain(environment = process.env) {
 }
 function resolveExpoPublicOrigin(environment, requestHost, requestProtocol) {
   const configuredDomain = selectExpoPublicDomain(environment);
-  const published = environment.REPLIT_DEPLOYMENT === "1" || environment.NODE_ENV === "production";
-  if (published && !configuredDomain) return null;
   return resolvePublicOrigin(
     configuredDomain,
     requestHost,
     requestProtocol
+  );
+}
+function lastForwardedValue(value) {
+  const values = value?.split(",").map((item) => item.trim()).filter(Boolean);
+  return values?.at(-1) ?? null;
+}
+function resolveExpoRequestOrigin(environment, requestHost, requestProtocol, forwardedHost, forwardedProtocol) {
+  const proxyHost = lastForwardedValue(forwardedHost);
+  const safeProxyHost = normalizePublicHost(proxyHost) ? proxyHost : null;
+  const proxyProtocol = lastForwardedValue(forwardedProtocol);
+  const safeProxyProtocol = proxyProtocol === "http" || proxyProtocol === "https" ? proxyProtocol : null;
+  return resolveExpoPublicOrigin(
+    environment,
+    safeProxyHost ?? requestHost,
+    safeProxyProtocol ?? requestProtocol
   );
 }
 function resolveMetroProxyHeaders(environment, requestHost, requestProtocol) {
@@ -1263,6 +1276,52 @@ function rewriteLocalManifestUrl(value, publicOrigin) {
   const pathname = normalizePublishedAssetPath(url.pathname);
   return `${publicOrigin.origin}${pathname}${url.search}${url.hash}`;
 }
+function getNestedValue(root, path3) {
+  let current = root;
+  for (const segment of path3) {
+    if (!isObject(current)) return void 0;
+    current = current[segment];
+  }
+  return current;
+}
+function setNestedValue(root, path3, value) {
+  let current = root;
+  for (const segment of path3.slice(0, -1)) {
+    if (!isObject(current[segment])) current[segment] = {};
+    current = current[segment];
+  }
+  current[path3.at(-1)] = value;
+}
+function addDevelopmentConfigAssetUrls(expoClient, platform, publicOrigin) {
+  const assetFields = [
+    [["icon"], ["iconUrl"]],
+    [["splash", "image"], ["splash", "imageUrl"]],
+    [
+      ["android", "adaptiveIcon", "foregroundImage"],
+      ["android", "adaptiveIcon", "foregroundImageUrl"]
+    ],
+    [
+      ["android", "adaptiveIcon", "backgroundImage"],
+      ["android", "adaptiveIcon", "backgroundImageUrl"]
+    ],
+    [
+      ["android", "adaptiveIcon", "monochromeImage"],
+      ["android", "adaptiveIcon", "monochromeImageUrl"]
+    ]
+  ];
+  for (const [sourcePath, outputPath] of assetFields) {
+    const source = getNestedValue(expoClient, sourcePath);
+    if (typeof source !== "string" || !source.startsWith("./") || source.includes("..") || /[?#\\]/.test(source)) {
+      continue;
+    }
+    const assetPath = source.split("/").map((segment) => encodeURIComponent(segment)).join("/");
+    setNestedValue(
+      expoClient,
+      outputPath,
+      `${publicOrigin.origin}/assets/${assetPath}?platform=${platform}`
+    );
+  }
+}
 function prepareExpoManifest(input, platform, publicOrigin) {
   if (!isObject(input)) {
     throw new Error(`Malformed Expo manifest for ${platform}`);
@@ -1308,6 +1367,41 @@ function prepareExpoManifest(input, platform, publicOrigin) {
     expoGo.packagerOpts = {};
   }
   expoGo.packagerOpts.dev = false;
+  return manifest;
+}
+function prepareExpoDevelopmentManifest(input, platform, publicOrigin) {
+  if (!isObject(input)) {
+    throw new Error(`Malformed Expo development manifest for ${platform}`);
+  }
+  const manifest = structuredClone(input);
+  rewriteLocalManifestUrls(manifest, publicOrigin);
+  if (!isObject(manifest.launchAsset)) {
+    throw new Error(`Expo development manifest has no launch asset for ${platform}`);
+  }
+  manifest.launchAsset.url = rebaseUrl(
+    manifest.launchAsset.url,
+    publicOrigin.origin
+  );
+  manifest.launchAsset.contentType = "application/javascript";
+  if (Array.isArray(manifest.assets)) {
+    for (const asset of manifest.assets) {
+      if (!isObject(asset) || typeof asset.url !== "string") continue;
+      asset.url = rebaseUrl(asset.url, publicOrigin.origin);
+    }
+  }
+  if (!isObject(manifest.extra)) manifest.extra = {};
+  const extra = manifest.extra;
+  if (!isObject(extra.expoClient)) extra.expoClient = {};
+  const expoClient = extra.expoClient;
+  expoClient.hostUri = publicOrigin.host;
+  delete expoClient._internal;
+  addDevelopmentConfigAssetUrls(expoClient, platform, publicOrigin);
+  if (!isObject(extra.expoGo)) extra.expoGo = {};
+  const expoGo = extra.expoGo;
+  expoGo.debuggerHost = publicOrigin.host;
+  if (isObject(expoGo.developer)) {
+    delete expoGo.developer.projectRoot;
+  }
   return manifest;
 }
 function injectExpoPublicOrigin(bundle, publicOrigin) {
@@ -1460,11 +1554,78 @@ function getAppName() {
   }
 }
 function getRequestPublicOrigin(req) {
-  return resolveExpoPublicOrigin(
+  return resolveExpoRequestOrigin(
     process.env,
     req.get("host"),
-    req.protocol
+    req.protocol,
+    req.get("x-forwarded-host"),
+    req.get("x-forwarded-proto")
   );
+}
+function headerValue(value) {
+  return Array.isArray(value) ? value.join(",") : value;
+}
+function getProxyRequestPublicOrigin(req) {
+  const encrypted = req.socket.encrypted;
+  return resolveExpoRequestOrigin(
+    process.env,
+    headerValue(req.headers.host),
+    encrypted ? "https" : "http",
+    headerValue(req.headers["x-forwarded-host"]),
+    headerValue(req.headers["x-forwarded-proto"])
+  );
+}
+function copyExpoResponseHeaders(source, destination) {
+  for (const name of [
+    "expo-protocol-version",
+    "expo-sfv-version",
+    "cache-control"
+  ]) {
+    const value = source.headers.get(name);
+    if (value) destination.setHeader(name, value);
+  }
+}
+async function serveDevelopmentExpoManifest(metroPort, req, res, next) {
+  const platform = req.header("expo-platform") ?? (typeof req.query.platform === "string" ? req.query.platform : void 0);
+  const isManifestPath = req.path === "/" || req.path === "/manifest" || req.path === "/index.exp";
+  if (!isManifestPath || platform !== "ios" && platform !== "android") {
+    next();
+    return;
+  }
+  try {
+    const upstreamHeaders = {};
+    for (const name of [
+      "accept",
+      "expo-platform",
+      "expo-protocol-version",
+      "user-agent"
+    ]) {
+      const value = req.header(name);
+      if (value) upstreamHeaders[name] = value;
+    }
+    const upstream = await fetch(
+      `http://127.0.0.1:${metroPort}${req.originalUrl}`,
+      {
+        headers: upstreamHeaders,
+        signal: AbortSignal.timeout(12e4)
+      }
+    );
+    const body = await upstream.text();
+    copyExpoResponseHeaders(upstream, res);
+    if (!upstream.ok) {
+      res.status(upstream.status).type("text/plain").send(body);
+      return;
+    }
+    const manifest = prepareExpoDevelopmentManifest(
+      JSON.parse(body),
+      platform,
+      getRequestPublicOrigin(req)
+    );
+    res.status(200).type("application/expo+json").setHeader("cache-control", "no-store");
+    res.send(JSON.stringify(manifest));
+  } catch (error) {
+    next(error);
+  }
 }
 function serveExpoManifest(platform, req, res) {
   const manifestPath = path2.resolve(
@@ -1547,16 +1708,7 @@ function serveLandingPage({
   landingPageTemplate,
   appName
 }) {
-  const configuredDomain = selectExpoPublicDomain(process.env);
-  if (process.env.NODE_ENV === "production" && !normalizePublicHost(configuredDomain)) {
-    res.status(503).type("text/plain").send("Service unavailable");
-    return;
-  }
-  const { host, origin: baseUrl } = resolvePublicOrigin(
-    configuredDomain,
-    req.get("host"),
-    req.protocol
-  );
+  const { host, origin: baseUrl } = getRequestPublicOrigin(req);
   const expsUrl = host;
   const cspNonce = randomBytes(18).toString("base64");
   log(`baseUrl`, baseUrl);
@@ -1627,20 +1779,22 @@ function configureDevelopmentMetroProxy(app2) {
     xfwd: false,
     on: {
       proxyReq: (proxyReq, req) => {
+        const requestOrigin = getProxyRequestPublicOrigin(req);
         const headers = resolveMetroProxyHeaders(
           process.env,
-          req.headers.host,
-          req.socket.encrypted ? "https" : "http"
+          requestOrigin.host,
+          requestOrigin.protocol
         );
         proxyReq.setHeader("host", headers.host);
         proxyReq.setHeader("x-forwarded-host", headers.forwardedHost);
         proxyReq.setHeader("x-forwarded-proto", headers.forwardedProto);
       },
       proxyReqWs: (proxyReq, req) => {
+        const requestOrigin = getProxyRequestPublicOrigin(req);
         const headers = resolveMetroProxyHeaders(
           process.env,
-          req.headers.host,
-          req.socket.encrypted ? "https" : "http"
+          requestOrigin.host,
+          requestOrigin.protocol
         );
         proxyReq.setHeader("host", headers.host);
         proxyReq.setHeader("x-forwarded-host", headers.forwardedHost);
@@ -1661,8 +1815,25 @@ function configureDevelopmentMetroProxy(app2) {
       return false;
     }
   });
+  app2.use((req, res, next) => {
+    void serveDevelopmentExpoManifest(metroPort, req, res, next);
+  });
   app2.use(metroProxy);
   return metroProxy;
+}
+function configureUnavailableExpo(app2, startupError) {
+  const diagnostic = startupError instanceof Error ? startupError.message : String(startupError);
+  console.error(`Expo static build unavailable: ${diagnostic}`);
+  app2.use((req, res, next) => {
+    if (req.path !== "/" && req.path !== "/manifest" && req.path !== "/index.exp") {
+      next();
+      return;
+    }
+    res.status(503).json({
+      error: "Expo build unavailable",
+      retryable: false
+    });
+  });
 }
 function configureDevelopmentLandingPage(app2) {
   const templatePath = path2.resolve(
@@ -1701,15 +1872,21 @@ async function startServer() {
   setupCors(app);
   setupBodyParsing(app);
   setupRequestLogging(app);
+  let expoStatus = process.env.NODE_ENV === "production" ? "static" : "metro-proxy";
   app.get("/healthz", (_req, res) => {
     res.status(200).json({
       status: "ok",
-      expo: process.env.NODE_ENV === "production" ? "static" : "metro-proxy"
+      expo: expoStatus
     });
   });
   const metroProxy = process.env.NODE_ENV === "production" ? null : configureDevelopmentMetroProxy(app);
   if (process.env.NODE_ENV === "production") {
-    configureExpoAndLanding(app);
+    try {
+      configureExpoAndLanding(app);
+    } catch (error) {
+      expoStatus = "static-unavailable";
+      configureUnavailableExpo(app, error);
+    }
   } else {
     configureDevelopmentLandingPage(app);
   }

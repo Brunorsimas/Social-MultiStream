@@ -49,18 +49,42 @@ export function resolveExpoPublicOrigin(
   environment: Environment,
   requestHost?: string | null,
   requestProtocol?: string | null,
-): PublicOrigin | null {
+): PublicOrigin {
   const configuredDomain = selectExpoPublicDomain(environment);
-  const published =
-    environment.REPLIT_DEPLOYMENT === "1" ||
-    environment.NODE_ENV === "production";
-
-  if (published && !configuredDomain) return null;
-
   return resolvePublicOrigin(
     configuredDomain,
     requestHost,
     requestProtocol,
+  );
+}
+
+function lastForwardedValue(value?: string | null): string | null {
+  const values = value
+    ?.split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+  return values?.at(-1) ?? null;
+}
+
+export function resolveExpoRequestOrigin(
+  environment: Environment,
+  requestHost?: string | null,
+  requestProtocol?: string | null,
+  forwardedHost?: string | null,
+  forwardedProtocol?: string | null,
+): PublicOrigin {
+  const proxyHost = lastForwardedValue(forwardedHost);
+  const safeProxyHost = normalizePublicHost(proxyHost) ? proxyHost : null;
+  const proxyProtocol = lastForwardedValue(forwardedProtocol);
+  const safeProxyProtocol =
+    proxyProtocol === "http" || proxyProtocol === "https"
+      ? proxyProtocol
+      : null;
+
+  return resolveExpoPublicOrigin(
+    environment,
+    safeProxyHost ?? requestHost,
+    safeProxyProtocol ?? requestProtocol,
   );
 }
 
@@ -170,6 +194,68 @@ function rewriteLocalManifestUrl(
   return `${publicOrigin.origin}${pathname}${url.search}${url.hash}`;
 }
 
+function getNestedValue(root: JsonObject, path: string[]): unknown {
+  let current: unknown = root;
+  for (const segment of path) {
+    if (!isObject(current)) return undefined;
+    current = current[segment];
+  }
+  return current;
+}
+
+function setNestedValue(root: JsonObject, path: string[], value: string): void {
+  let current = root;
+  for (const segment of path.slice(0, -1)) {
+    if (!isObject(current[segment])) current[segment] = {};
+    current = current[segment] as JsonObject;
+  }
+  current[path.at(-1)!] = value;
+}
+
+function addDevelopmentConfigAssetUrls(
+  expoClient: JsonObject,
+  platform: "ios" | "android",
+  publicOrigin: PublicOrigin,
+): void {
+  const assetFields: Array<[string[], string[]]> = [
+    [["icon"], ["iconUrl"]],
+    [["splash", "image"], ["splash", "imageUrl"]],
+    [
+      ["android", "adaptiveIcon", "foregroundImage"],
+      ["android", "adaptiveIcon", "foregroundImageUrl"],
+    ],
+    [
+      ["android", "adaptiveIcon", "backgroundImage"],
+      ["android", "adaptiveIcon", "backgroundImageUrl"],
+    ],
+    [
+      ["android", "adaptiveIcon", "monochromeImage"],
+      ["android", "adaptiveIcon", "monochromeImageUrl"],
+    ],
+  ];
+
+  for (const [sourcePath, outputPath] of assetFields) {
+    const source = getNestedValue(expoClient, sourcePath);
+    if (
+      typeof source !== "string" ||
+      !source.startsWith("./") ||
+      source.includes("..") ||
+      /[?#\\]/.test(source)
+    ) {
+      continue;
+    }
+    const assetPath = source
+      .split("/")
+      .map((segment) => encodeURIComponent(segment))
+      .join("/");
+    setNestedValue(
+      expoClient,
+      outputPath,
+      `${publicOrigin.origin}/assets/${assetPath}?platform=${platform}`,
+    );
+  }
+}
+
 export function prepareExpoManifest(
   input: unknown,
   platform: "ios" | "android",
@@ -232,6 +318,53 @@ export function prepareExpoManifest(
     expoGo.packagerOpts = {};
   }
   (expoGo.packagerOpts as JsonObject).dev = false;
+
+  return manifest;
+}
+
+export function prepareExpoDevelopmentManifest(
+  input: unknown,
+  platform: "ios" | "android",
+  publicOrigin: PublicOrigin,
+): JsonObject {
+  if (!isObject(input)) {
+    throw new Error(`Malformed Expo development manifest for ${platform}`);
+  }
+
+  const manifest = structuredClone(input);
+  rewriteLocalManifestUrls(manifest, publicOrigin);
+
+  if (!isObject(manifest.launchAsset)) {
+    throw new Error(`Expo development manifest has no launch asset for ${platform}`);
+  }
+  manifest.launchAsset.url = rebaseUrl(
+    manifest.launchAsset.url,
+    publicOrigin.origin,
+  );
+  manifest.launchAsset.contentType = "application/javascript";
+
+  if (Array.isArray(manifest.assets)) {
+    for (const asset of manifest.assets) {
+      if (!isObject(asset) || typeof asset.url !== "string") continue;
+      asset.url = rebaseUrl(asset.url, publicOrigin.origin);
+    }
+  }
+
+  if (!isObject(manifest.extra)) manifest.extra = {};
+  const extra = manifest.extra as JsonObject;
+
+  if (!isObject(extra.expoClient)) extra.expoClient = {};
+  const expoClient = extra.expoClient as JsonObject;
+  expoClient.hostUri = publicOrigin.host;
+  delete expoClient._internal;
+  addDevelopmentConfigAssetUrls(expoClient, platform, publicOrigin);
+
+  if (!isObject(extra.expoGo)) extra.expoGo = {};
+  const expoGo = extra.expoGo as JsonObject;
+  expoGo.debuggerHost = publicOrigin.host;
+  if (isObject(expoGo.developer)) {
+    delete expoGo.developer.projectRoot;
+  }
 
   return manifest;
 }
