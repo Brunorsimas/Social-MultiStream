@@ -9,6 +9,7 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
   var chatId = ${serializedChatId};
   var chatName = ${serializedChatName};
   var processed = new WeakSet();
+  var seenIds = {};
   var sequence = 0;
   var rowSelector = [
     '[class*="chat-line__message"]',
@@ -18,6 +19,11 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
   ].join(',');
 
   function processElement(el) {
+    if (processed.has(el)) return null;
+
+    var elementId = el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-message-id'));
+    if (elementId && seenIds[elementId]) return null;
+
     var userEl = el.querySelector
       ? el.querySelector('[class*="chat-author__display-name"], .chat-author__display-name, [data-a-target="chat-message-username"]')
       : null;
@@ -41,9 +47,8 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
 
     if (!userName || !message) return null;
 
-    if (processed.has(el)) return null;
     processed.add(el);
-    var elementId = el.getAttribute && (el.getAttribute('data-id') || el.getAttribute('data-message-id'));
+    if (elementId) seenIds[elementId] = true;
     var id = chatId + '_tw_' + (elementId || (Date.now().toString(36) + '_' + (++sequence)));
     var avatarEl = el.querySelector ? el.querySelector('img[alt*="avatar"], img[class*="avatar"]') : null;
 
@@ -99,8 +104,9 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
 
   function start() {
     scanDocument();
-    setupObserver();
-    setInterval(scanDocument, 3000);
+    if (!setupObserver()) {
+      setInterval(scanDocument, 3000);
+    }
   }
 
   if (document.body) start();
@@ -109,6 +115,7 @@ export function getTwitchScraper(chatId: string, chatName: string): string {
 true;
 `;
 }
+
 
 export function getYouTubeScraper(chatId: string, chatName: string): string {
   const serializedChatId = JSON.stringify(chatId);
@@ -221,8 +228,9 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
 
   function start() {
     scanDocument();
-    setupObserver();
-    setInterval(scanDocument, 3000);
+    if (!setupObserver()) {
+      setInterval(scanDocument, 3000);
+    }
   }
 
   if (document.body) start();
@@ -231,6 +239,7 @@ export function getYouTubeScraper(chatId: string, chatName: string): string {
 true;
 `;
 }
+
 
 export function getKickScraper(chatId: string, chatName: string): string {
   const serializedChatId = JSON.stringify(chatId);
@@ -352,8 +361,9 @@ export function getKickScraper(chatId: string, chatName: string): string {
 
   function start() {
     scanDocument();
-    setupObserver();
-    setInterval(scanDocument, 3000);
+    if (!setupObserver()) {
+      setInterval(scanDocument, 3000);
+    }
   }
 
   if (document.body) start();
@@ -564,8 +574,9 @@ export function getGenericScraper(chatId: string, chatName: string, platform: st
 
   function start() {
     scanDocument();
-    setupObserver();
-    setInterval(scanDocument, 3000);
+    if (!setupObserver()) {
+      setInterval(scanDocument, 3000);
+    }
   }
 
   if (document.body) start();
