@@ -234,6 +234,14 @@ test("parses Twitch IRC PRIVMSG tags and content", () => {
   });
 });
 
+test("uses the Twitch Shared Chat source id as the canonical message id", () => {
+  const message = parseTwitchPrivmsg(
+    "@display-name=Thor;id=room-copy-id;source-id=original-message-id;source-room-id=12826;tmi-sent-ts=1770000000000 :thor!thor@thor.tmi.twitch.tv PRIVMSG #sharedchannel :mensagem compartilhada",
+  );
+
+  assert.equal(message?.messageId, "original-message-id");
+});
+
 test("normalizes YouTube renderer messages and continuations", () => {
   const payload = {
     continuationContents: {

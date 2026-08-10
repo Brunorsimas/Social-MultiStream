@@ -114,7 +114,12 @@ function useWebChatSSE(
                   ? chat.platform
                   : "unknown";
               globalAggregator.addMessage({
-                messageId: `${chat.id}_${platform}_${data.messageId}`,
+                // Keep Twitch's canonical IRC UUID intact so Shared Chat
+                // copies received through multiple channels can be deduped.
+                messageId:
+                  platform === "twitch"
+                    ? String(data.messageId ?? "")
+                    : `${chat.id}_${platform}_${data.messageId}`,
                 platform,
                 chatId: chat.id,
                 chatName: chat.name,

@@ -33,6 +33,22 @@ test("deduplicates within a chat without hiding the same platform id from anothe
   assert.equal(aggregator.getMessages().length, 2);
 });
 
+test("deduplicates a Twitch message forwarded to multiple Shared Chat rooms", () => {
+  const aggregator = new MessageAggregator();
+  aggregator.addMessage(message({
+    platform: "twitch",
+    messageId: "shared-source-id",
+    chatId: "twitch-room-1",
+  }));
+  aggregator.addMessage(message({
+    platform: "twitch",
+    messageId: "shared-source-id",
+    chatId: "twitch-room-2",
+  }));
+
+  assert.equal(aggregator.getMessages().length, 1);
+});
+
 test("keeps repeated message text when ids differ", () => {
   const aggregator = new MessageAggregator();
   aggregator.addMessage(message({ messageId: "first" }));
@@ -61,4 +77,3 @@ test("normalizes invalid values and notifies a new subscriber immediately", () =
   assert.equal(snapshot[0].message, "hello");
   assert.ok(Number.isFinite(snapshot[0].timestamp));
 });
-

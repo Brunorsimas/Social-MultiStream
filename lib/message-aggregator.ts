@@ -100,6 +100,11 @@ export class MessageAggregator {
   }
 
   private getDedupeKey(msg: UnifiedChatMessage): string {
+    // Twitch message UUIDs are global. Shared Chat forwards one logical
+    // message to every participating room, so chat-scoped keys show copies.
+    if (msg.platform === "twitch") {
+      return `${msg.platform}\u0000${msg.messageId}`;
+    }
     return `${msg.chatId}\u0000${msg.messageId}`;
   }
 

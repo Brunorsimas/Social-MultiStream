@@ -89,7 +89,9 @@ export function parseTwitchPrivmsg(
 
   return {
     messageId:
-      (tags.id || `${fallbackTimestamp}-${Math.random()}`)
+      // Shared Chat gives each destination room a different `id`, while
+      // preserving the original message UUID in `source-id`.
+      (tags["source-id"] || tags.id || `${fallbackTimestamp}-${Math.random()}`)
         .slice(0, MAX_MESSAGE_ID_LENGTH),
     userName:
       (tags["display-name"] || fallbackUser || "Unknown")
